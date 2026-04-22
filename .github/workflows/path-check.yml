@@ -1,0 +1,104 @@
+name: 경로 제한 검사
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate-paths:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get changed files
+        id: changed-files
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            git fetch origin "${{ github.base_ref }}" --depth=1
+            git diff --name-only "origin/${{ github.base_ref }}"...HEAD > changed_files.txt
+          else
+            if [[ "${{ github.event.before }}" == "0000000000000000000000000000000000000000" ]]; then
+              git ls-files > changed_files.txt
+            else
+              git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" > changed_files.txt
+            fi
+          fi
+
+          echo "changed_files<<EOF" >> "$GITHUB_OUTPUT"
+          cat changed_files.txt >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Validate path restrictions
+        uses: actions/github-script@v7
+        env:
+          FILES_MODIFIED: ${{ steps.changed-files.outputs.changed_files }}
+        with:
+          script: |
+            const raw = process.env.FILES_MODIFIED || '';
+            const files = raw
+              .split('\n')
+              .map(s => s.trim())
+              .filter(Boolean);
+      
+            const actor = context.actor;
+      
+            if (files.length === 0) {
+              core.info('No files changed.');
+              return;
+            }
+      
+            core.info(`Push by: ${actor}`);
+            core.info(`Changed files (${files.length}):`);
+            files.forEach(f => core.info(` - ${f}`));
+      
+            const violations = files.filter(file => {
+              // members/ 밖은 모두 허용
+              if (!file.startsWith('members/')) {
+                return false;
+              }
+      
+              // 본인 디렉터리는 허용
+              if (file.startsWith(`members/${actor}/`)) {
+                return false;
+              }
+      
+              // members 루트 자체를 직접 수정하는 경우는 금지
+              // 예: members/something.txt
+              const parts = file.split('/');
+      
+              // members/<dir>/... 구조에서 <dir> 확인
+              const memberDir = parts[1];
+      
+              // 필요하면 _template 허용 여부 조절 가능
+              // 지금은 다른 사람 디렉터리와 함께 금지
+              if (memberDir && memberDir !== actor) {
+                return true;
+              }
+      
+              return false;
+            });
+      
+            if (violations.length > 0) {
+              const msg = [
+                `❌ members 디렉터리 접근 제한 위반`,
+                ``,
+                `사용자 "${actor}"는 본인 디렉터리(members/${actor}/)만 수정할 수 있습니다.`,
+                `members 외부 파일은 자유롭게 수정 가능합니다.`,
+                ``,
+                `허용되지 않은 파일:`,
+                ...violations.map(f => ` • ${f}`),
+              ].join('\n');
+      
+              core.setFailed(msg);
+            } else {
+              core.info(`✅ 검사 통과: members/${actor}/ 외의 다른 사용자 디렉터리는 수정하지 않았습니다.`);
+            }
