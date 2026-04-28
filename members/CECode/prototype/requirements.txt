@@ -1,0 +1,7 @@
+fastapi
+python-multipart
+pandas
+numpy
+PyMuPDF
+pymysql
+uvicorn
