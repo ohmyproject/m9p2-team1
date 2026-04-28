@@ -1,6 +1,11 @@
 .vercel
 .env
-.env*.local
+.env.*
 .cloudrun-env.generated.yaml
 __pycache__/
 *.pyc
+*.pdf
+*.pem
+*.key
+*.p12
+*.pfx
