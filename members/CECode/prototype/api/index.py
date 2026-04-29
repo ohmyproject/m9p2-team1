@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import tempfile
 import urllib.error
@@ -58,145 +59,180 @@ app.add_middleware(
 )
 
 
-CODE_TO_STRENGTH = {
-    "R": "현장 실행, 문제 대응, 도구 활용",
-    "I": "분석, 리서치, 구조적 사고",
-    "A": "기획, 표현, 창의적 해결",
-    "S": "협업, 커뮤니케이션, 지원",
-    "E": "리드, 설득, 추진력",
-    "C": "정리, 운영, 문서화",
-}
-
-
 class RoadmapRequest(BaseModel):
     job_id: int | None = None
     job_title: str | None = None
     profile: dict | None = None
 
 
-def build_profile_text(profile: dict | None) -> str:
-    if not profile:
-        return "사용자 프로필 정보가 아직 비어 있습니다."
-
-    fields = [
-        ("이름", profile.get("name")),
-        ("전공", profile.get("major")),
-        ("목표", profile.get("goal")),
-        ("상태", profile.get("status")),
-        ("메모", profile.get("note")),
-    ]
-    return "\n".join(f"- {label}: {value}" for label, value in fields if value)
+def is_user_major_profile(profile: dict | None) -> bool:
+    major = str((profile or {}).get("major") or "")
+    return "비전공" not in major and "타전공" not in major
 
 
-def fallback_roadmap(job: dict, profile: dict | None) -> dict:
-    codes = [code for code in job.get("top3", "") if code in CODE_TO_STRENGTH]
-    strengths = [CODE_TO_STRENGTH[code] for code in codes[:3]]
-    title = job["title"]
-    category = job["category"]
-    definition = job.get("job_definition") or job.get("description") or ""
-    definition_summary = job.get("definition_summary") or job.get("description") or title
-    goal = (profile or {}).get("goal") or "준비 방향 설정"
-    status = (profile or {}).get("status") or "현재 상태 미정"
+def build_test_roadmap_prompt(job: dict, profile: dict | None) -> str:
+    job_name = job["title"]
+    is_major_required = job.get("major_required") == "O"
+    is_user_major = is_user_major_profile(profile)
 
+    if is_major_required:
+        if not is_user_major:
+            # 🤖 [학위 필수 비전공자용] 로드맵 프롬프트
+            sys_role = "당신은 특정 직무에 진입하기 위해 반드시 학위가 필요한 경우, 현실적인 진입 경로를 안내하는 커리어 코치입니다."
+            user_context = f"- 선택한 직무: {job_name}\n- 전공 여부: 비전공/타전공\n- 커리어 방향: 도전\n- 현재 상태: 관련 학위 없음"
+            out_inst = (
+                f"1. 도입부: \"사용자님께서 선택하신 {job_name}는 학위가 필수인 직무이기에…\"로 시작\n\n"
+                f"2. 3단계 실행 구조:\n"
+                f"■ 1단계: 학위 취득 경로 탐색\n- 필요한 학과/전공 명확히 제시\n- 신입학/편입/대학원 등 경로 비교\n- 📌 결과물: 지원 가능한 학교 리스트 또는 목표 설정\n\n"
+                f"■ 2단계: 입시 준비 및 기초 학습\n- 입시 요소 (수능, 편입, 면접 등) 설명\n- 준비 전략 제시\n- 📌 필요 역량 2~3개 + 준비 방법\n- 📌 결과물: 학습 계획표\n\n"
+                f"■ 3단계: 전문 교육 및 자격 취득\n- 졸업 후 필수 자격증/면허 설명\n- 고용24 지원 제도 안내\n- 📌 결과물: 커리어 로드맵 (입학 → 졸업 → 취업 흐름)\n\n"
+                f"3. 작성 규칙:\n- 왜 학위가 필요한지 쉽게 설명\n- 각 단계마다 실행 가능한 결과물 포함\n- 각 단계 끝에 \"💡 현실적 Tip\" 포함\n- 전체 분량: 700~900자"
+            )
+        else:
+            # 🤖 [학위 필수 전공자용] 직무 도전 로드맵 프롬프트
+            sys_role = (
+                "당신은 특정 직무에 진입하기 위해 반드시 필요한 학위를 이미 이수(또는 졸업 예정)했지만, "
+                "본격적인 취업이나 면허 취득을 앞두고 막막함을 느끼는 초보자를 위한 전문 커리어 코치입니다. "
+                "학위 취득 이후 거쳐야 하는 필수 관문(국가고시, 수습 등)부터 실제 현장 진입까지의 최단 경로를 구체적으로 안내해야 합니다."
+            )
+            user_context = (
+                f"선택한 직무: {job_name}\n"
+                f"전공 여부: 필수 전공 이수 (학위 보유)\n"
+                f"커리어 방향: 도전\n"
+                f"현재 상태: 관련 학위는 있으나, 최종 면허 취득 전이거나 실무 경험이 없는 상태 (Junior Ready)"
+            )
+            out_inst = (
+                f"도입부: \"사용자님께서 선택하신 {job_name}는 필수 전공 학위를 이미 이수하셨기에, 해당 직무 도전을 위해 다음과 같이 본격적인 현장 진입 준비를 하시면 좋을 것 같습니다.\"로 시작할 것.\n\n"
+                f"3단계 실행 구조:\n"
+                f"■ 1단계: 필수 라이선스(면허/자격) 획득 및 현장 감각 깨우기\n"
+                f"- 해당 직무 진입에 필수적인 국가고시 또는 필수 면허 취득 전략 제시\n"
+                f"- 반드시 필요한 국가 자격증, 면허, 시험 명칭을 구체적으로 포함\n"
+                f"- 선배 실무자의 브이로그, 현직자 인터뷰를 통해 학교와 현장의 차이점 파악\n"
+                f"- 실무에서 실제로 자주 마주치는 상황(야간근무, 고객 응대, 서류 작성, 현장 변수 등)까지 함께 안내\n"
+                f"📌 결과물: 자격/면허 시험 합격을 위한 ‘과목별 핵심 요약 노트’ 또는 ‘스터디 플랜’\n"
+                f"💡 현실적 Tip: 시험 합격만을 목표로 하지 말고, “실제로 이 일을 하게 되면 어떤 하루를 보내는가”를 함께 파악해야 중도 포기를 줄일 수 있음\n\n"
+                f"■ 2단계: 필수 수습/실습 파악 및 실무 도구 점검\n"
+                f"- 직무에 따라 요구되는 법정 수습 기간, 인턴십, 실무 연수 과정 등 안내\n"
+                f"- 실무에서 당장 쓰이는 전문 프로그램, 장비, 행정 서식 등의 기초 파악\n"
+                f"- 채용공고에서 반복적으로 등장하는 실무 역량 2~3개를 반드시 추출하여 제시\n"
+                f"- 각 역량별로 고용24 심화/특화 과정, 실습, 스터디 등 현실적인 학습 방법 연결\n"
+                f"📌 결과물: 실무에 투입되었을 때 당황하지 않기 위한 나만의 ‘업무 매뉴얼(체크리스트) 초안’\n"
+                f"💡 현실적 Tip: 실무는 “얼마나 많이 아는가”보다 “바로 투입 가능한가”가 중요하므로, 반복되는 업무 흐름을 먼저 익히는 것이 효과적임\n\n"
+                f"■ 3단계: 실전 구직 및 전문성 증명\n"
+                f"- 고용24 또는 해당 직무에 특화된 채용 플랫폼 활용법 안내\n"
+                f"- 단순 전공 지식을 넘어 실습/수련 경험을 녹여내는 이력서/자기소개서 작성 가이드\n"
+                f"- 채용담당자가 바로 이해할 수 있는 형태의 전문성 증명 자료 제시(임상 케이스, 실습 기록, 프로젝트 리포트 등)\n"
+                f"📌 결과물: 학과 시절의 실습/프로젝트 경험이 구체적으로 담긴 ‘직무기술서(또는 포트폴리오)’ 1개 제시\n"
+                f"💡 현실적 Tip: “무엇을 배웠는가”보다 “실제로 어떤 문제를 해결했는가”를 보여주는 방식이 채용에서 훨씬 강하게 작용함\n\n"
+                f"작성 규칙:\n"
+                f"- {job_name}에 맞는 구체적인 면허/국가 자격증 명칭 반드시 포함\n"
+                f"- 이론(학교)과 실무(현장)의 차이를 좁혀주는 구체적인 팁 제공\n"
+                f"- 각 단계마다 반드시 실행 가능한 결과물 포함\n"
+                f"- 각 단계 끝에 반드시 “💡 현실적 Tip” 포함\n"
+                f"- 답변은 초보자가 바로 행동할 수 있도록 현실적이고 구체적으로 작성\n"
+                f"- 전체 분량: 700~900자 내외"
+            )
+    else:
+        # 전공 필수가 아닌 직무 (기존 로직 유지 또는 간소화)
+        if not is_user_major:
+            sys_role = "당신은 비전공자로 해당 분야를 처음 접하는 초보자를 위한 전문 커리어 코치입니다."
+            user_context = f"- 선택한 직무: {job_name}\n- 전공 여부: 비전공\n- 커리어 방향: 도전/전향\n- 현재 상태: 완전 초보 (Day 0)"
+            out_inst = f"1. 도입부: \"사용자님께서 선택하신 {job_name}에 관해서는 비전공이시기에…\"로 시작\n2. 3단계 실행 구조(친해지기/도구 맛보기/전문 교육 진입)\n3. 초보자용 결과물 제시 및 💡 현실적 Tip 포함 (600~800자)"
+        else:
+            sys_role = "당신은 관련 전공을 졸업했지만 실무 경험이 없는 초보자를 위한 커리어 코치입니다."
+            user_context = f"- 선택한 직무: {job_name}\n- 전공 여부: 관련 전공\n- 커리어 방향: 도전/전향\n- 현재 상태: 이론 중심, 실무 경험 없음"
+            out_inst = f"1. 도입부: \"사용자님께서 선택하신 {job_name}에 관해서는 관련 전공자이시기에…\"로 시작\n2. 3단계 실행 구조(이론을 실전으로/실무 도구 점검/실전 역량 증명)\n3. 전공-실무 연결 및 💡 현실적 Tip 포함 (700~900자)"
+
+    return f"[System Role]\n{sys_role}\n\n[User Context]\n{user_context}\n\n[Output Instructions]\n{out_inst}"
+
+
+def summarize_roadmap_text(text: str, max_length: int = 170) -> str:
+    paragraphs = [part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()]
+    summary = paragraphs[0] if paragraphs else text.strip()
+    summary = re.sub(r"\s+", " ", summary)
+    if len(summary) <= max_length:
+        return summary
+    return summary[: max_length - 1].rstrip() + "…"
+
+
+def parse_roadmap_steps(raw_text: str) -> list[dict]:
+    pattern = re.compile(
+        r"(?:^|\n)\s*(?:■\s*)?([123])단계\s*[:：]\s*([^\n]+)\n?(.*?)(?=\n\s*(?:■\s*)?[123]단계\s*[:：]|\Z)",
+        re.S,
+    )
+    steps = []
+    for match in pattern.finditer(raw_text):
+        number, heading, body = match.groups()
+        actions = []
+        output = ""
+        for line in body.splitlines():
+            cleaned = line.strip().lstrip("-• ").strip()
+            if not cleaned:
+                continue
+            if "결과물" in cleaned and not output:
+                output = cleaned.split(":", 1)[-1].strip() if ":" in cleaned else cleaned
+                continue
+            if cleaned.startswith("💡"):
+                if len(actions) < 3:
+                    actions.append(cleaned)
+                continue
+            if len(actions) < 3:
+                actions.append(cleaned)
+        steps.append(
+            {
+                "title": f"Step {number}. {heading.strip()}",
+                "period": "AI 생성",
+                "actions": actions[:3] or [summarize_roadmap_text(body, 90)],
+                "output": output or "전체 내용 보기에서 세부 결과물을 확인하세요.",
+            }
+        )
+    return steps[:3]
+
+
+def build_openai_roadmap_payload(raw_text: str) -> dict:
     return {
-        "summary": f"{title} 로드맵입니다. 직무정의의 핵심인 '{definition_summary}'를 기준으로 현재 목표({goal})와 상태({status})에 맞춰 준비 단계를 정리했습니다.",
-        "steps": [
-            {
-                "title": "Step 1. 직무 이해와 기준선 만들기",
-                "period": "1~2주",
-                "actions": [
-                    f"직무정의에서 {title}의 핵심 업무, 성과 기준, 필요한 역량을 각각 3개씩 뽑기",
-                    f"{job['onet_title']} 관련 공고 10개를 읽고 공통 요구사항 추리기",
-                    f"내 경험을 '{definition_summary}'와 연결되는 사례 중심으로 정리하기",
-                ],
-                "output": "직무 요약 문서 1장, 공고 분석 메모 1개",
-            },
-            {
-                "title": "Step 2. 실무 증거 만들기",
-                "period": "3~6주",
-                "actions": [
-                    f"직무정의에 나온 업무 흐름을 반영한 {title} 미니 프로젝트 1~2개 만들기",
-                    "이력서와 포트폴리오에 들어갈 성과 문장을 STAR 형식으로 정리하기",
-                    f"{category} 분야 공고 표현에 맞춰 포트폴리오 설명을 다듬기",
-                ],
-                "output": "포트폴리오 1세트, 이력서 초안 1부",
-            },
-            {
-                "title": "Step 3. 지원 전략과 면접 준비",
-                "period": "2~3주",
-                "actions": [
-                    "지원 기업군을 3개로 나누고 공고별 자기소개 포인트 정리하기",
-                    f"직무정의 기반으로 {title} 지원 동기, 문제 해결 경험, 협업 경험 답변 스크립트 작성하기",
-                    "모의 면접 질문 10개로 답변 연습하기",
-                ],
-                "output": "지원용 이력서/자소서, 면접 답변 노트",
-            },
-        ],
-        "certifications": [
-            f"{title}와 직접 연결되는 실무형 자격증 또는 수료증 1개 조사",
-            "엑셀, 데이터 정리, 문서화 같은 공통 도구 역량 보완",
-            "관심 산업에 맞는 부트캠프/온라인 강의 선별",
-        ],
-        "resources": [
-            "채용 공고 10개 분석 표 만들기",
-            f"직무정의 원문 검토: {definition[:80]}..." if len(definition) > 80 else f"직무정의 원문 검토: {definition}",
-            "현직자 인터뷰 또는 유튜브 직무 브이로그 3개 보기",
-            "포트폴리오 또는 직무 노트 Notion 페이지 구성",
-        ],
-        "strengths": strengths or ["직무 관련 강점을 추후 보강"],
+        "summary": summarize_roadmap_text(raw_text),
+        "steps": parse_roadmap_steps(raw_text),
+        "certifications": [],
+        "resources": [],
+        "strengths": [],
+        "raw_text": raw_text,
+        "source": "openai",
     }
 
 
-def generate_openai_roadmap(job: dict, profile: dict | None) -> dict | None:
+def extract_chat_completion_text(raw: dict) -> str:
+    choices = raw.get("choices") or []
+    if not choices:
+        return ""
+    content = (choices[0].get("message") or {}).get("content") or ""
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict):
+                parts.append(str(item.get("text") or item.get("content") or ""))
+        return "\n".join(part for part in parts if part).strip()
+    return str(content).strip()
+
+
+def generate_openai_roadmap(job: dict, profile: dict | None) -> dict:
     api_key = os.getenv("OPENAI_API_KEY")
-    model = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+    model = os.getenv("OPENAI_MODEL", "gpt-5-mini")
     if not api_key:
-        return None
-    job_definition = job.get("job_definition") or job.get("description") or ""
+        raise HTTPException(status_code=500, detail="OPENAI_API_KEY가 설정되어 있지 않아 로드맵을 생성할 수 없습니다.")
 
-    prompt = f"""
-당신은 한국 취업 준비용 직무 코치입니다.
-반드시 JSON 객체만 반환하세요.
-
-직무 정보:
-- 직무명: {job["title"]}
-- 대분류: {job["category"]}
-- 연관 O*NET 직무: {job["onet_title"]}
-- 화면 표시용 한 줄 요약: {job["description"]}
-- 로드맵 기준 직무정의 원문: {job_definition}
-- 흥미 코드: {job.get("top3", "")}
-- 태그: {", ".join(job.get("tags", []))}
-
-사용자 프로필:
-{build_profile_text(profile)}
-
-반환 형식:
-{{
-  "summary": "한 문단 요약",
-  "steps": [
-    {{
-      "title": "Step 1 제목",
-      "period": "기간",
-      "actions": ["행동1", "행동2", "행동3"],
-      "output": "이 단계 결과물"
-    }}
-  ],
-  "certifications": ["추천 자격/학습 항목1", "항목2", "항목3"],
-  "resources": ["참고 자료 유형1", "자료 유형2", "자료 유형3"],
-  "strengths": ["이 직무에 중요한 역량1", "역량2", "역량3"]
-}}
-
-조건:
-- steps는 정확히 3개
-- 한국어로 작성
-- 로드맵은 반드시 직무정의 원문의 업무 내용과 역량을 기준으로 구성
-- 각 action은 짧고 실행 가능하게 작성
-- 자격증이 꼭 없으면 학습 주제나 도구 역량으로 대체 가능
-""".strip()
-
-    payload = {"model": model, "input": prompt}
+    full_prompt = build_test_roadmap_prompt(job, profile)
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": full_prompt},
+            {"role": "user", "content": "나를 위한 직무 전환 및 취업 로드맵을 작성해줘."},
+        ],
+    }
     request = urllib.request.Request(
-        "https://api.openai.com/v1/responses",
+        "https://api.openai.com/v1/chat/completions",
         data=json.dumps(payload).encode("utf-8"),
         headers={
             "Authorization": f"Bearer {api_key}",
@@ -207,28 +243,23 @@ def generate_openai_roadmap(job: dict, profile: dict | None) -> dict | None:
     try:
         with urllib.request.urlopen(request, timeout=45) as response:
             raw = json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
-        return None
+    except urllib.error.HTTPError as exc:
+        error_body = exc.read().decode("utf-8", errors="ignore")
+        message = error_body or getattr(exc, "reason", "") or str(exc)
+        raise HTTPException(status_code=502, detail=f"OpenAI 로드맵 생성 요청에 실패했습니다: {message[:300]}") from exc
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise HTTPException(status_code=502, detail=f"OpenAI 로드맵 생성 요청에 실패했습니다: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=502, detail="OpenAI 응답을 해석하지 못했습니다.") from exc
 
-    text = raw.get("output_text", "").strip()
+    text = extract_chat_completion_text(raw)
     if not text:
-        return None
-
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        start = text.find("{")
-        end = text.rfind("}")
-        if start == -1 or end == -1:
-            return None
-        try:
-            return json.loads(text[start : end + 1])
-        except json.JSONDecodeError:
-            return None
+        raise HTTPException(status_code=502, detail="OpenAI 응답에서 로드맵 텍스트를 찾지 못했습니다.")
+    return build_openai_roadmap_payload(text)
 
 
 def generate_roadmap(job: dict, profile: dict | None) -> dict:
-    return generate_openai_roadmap(job, profile) or fallback_roadmap(job, profile)
+    return generate_openai_roadmap(job, profile)
 
 
 HOME_HTML = """
@@ -238,7 +269,7 @@ HOME_HTML = """
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>노비Job아라 Prototype</title>
-  <link rel="stylesheet" href="/static/app.css?v=dashboard-20260428-2">
+  <link rel="stylesheet" href="/static/app.css?v=dashboard-20260429-drawer">
 </head>
 <body>
   <div class="app-shell">
@@ -311,7 +342,19 @@ HOME_HTML = """
       </section>
     </main>
   </div>
-  <script src="/static/app.js?v=dashboard-20260428-2"></script>
+  <div class="roadmap-drawer-backdrop is-hidden" id="roadmap-drawer-backdrop"></div>
+  <aside class="roadmap-drawer is-hidden" id="roadmap-drawer" aria-hidden="true" aria-labelledby="roadmap-drawer-title">
+    <div class="roadmap-drawer-head">
+      <div>
+        <p class="eyebrow">전체 로드맵</p>
+        <h2 id="roadmap-drawer-title">선택 직무 로드맵</h2>
+        <div class="drawer-meta" id="roadmap-drawer-meta"></div>
+      </div>
+      <button class="drawer-close-btn" id="roadmap-drawer-close" type="button" aria-label="전체 로드맵 닫기">닫기</button>
+    </div>
+    <pre class="roadmap-full-text" id="roadmap-drawer-body"></pre>
+  </aside>
+  <script src="/static/app.js?v=dashboard-20260429-drawer"></script>
 </body>
 </html>
 """

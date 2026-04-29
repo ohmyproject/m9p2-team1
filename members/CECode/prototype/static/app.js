@@ -15,6 +15,7 @@
     selectedJob: null,
     profile: {},
     chatStep: "idle",
+    currentRoadmap: null,
   };
 
   const elements = {
@@ -34,6 +35,12 @@
     chatThread: document.getElementById("chat-thread"),
     choiceRow: document.getElementById("choice-row"),
     roadmapShell: document.getElementById("roadmap-shell"),
+    roadmapDrawer: document.getElementById("roadmap-drawer"),
+    roadmapDrawerBackdrop: document.getElementById("roadmap-drawer-backdrop"),
+    roadmapDrawerClose: document.getElementById("roadmap-drawer-close"),
+    roadmapDrawerTitle: document.getElementById("roadmap-drawer-title"),
+    roadmapDrawerMeta: document.getElementById("roadmap-drawer-meta"),
+    roadmapDrawerBody: document.getElementById("roadmap-drawer-body"),
   };
 
   function escapeHtml(value) {
@@ -43,6 +50,76 @@
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#039;");
+  }
+
+  function summarizeText(value, maxLength = 140) {
+    const compact = String(value ?? "").replace(/\s+/g, " ").trim();
+    if (compact.length <= maxLength) return compact;
+    return `${compact.slice(0, maxLength - 1).trim()}…`;
+  }
+
+  function parseRawRoadmapSteps(rawText) {
+    const text = String(rawText || "");
+    const pattern = /(?:^|\n)\s*(?:■\s*)?([123])단계\s*[:：]\s*([^\n]+)\n?([\s\S]*?)(?=\n\s*(?:■\s*)?[123]단계\s*[:：]|$)/g;
+    const steps = [];
+    let match;
+
+    while ((match = pattern.exec(text)) && steps.length < 3) {
+      const [, number, heading, body] = match;
+      const actions = [];
+      let output = "";
+
+      body.split(/\n/).forEach((line) => {
+        const cleaned = line.trim().replace(/^[-•]\s*/, "");
+        if (!cleaned) return;
+        if (cleaned.includes("결과물") && !output) {
+          output = cleaned.includes(":") ? cleaned.split(":").slice(1).join(":").trim() : cleaned;
+          return;
+        }
+        if (actions.length < 3) actions.push(cleaned);
+      });
+
+      steps.push({
+        title: `Step ${number}. ${heading.trim()}`,
+        period: "AI 생성",
+        actions: actions.length ? actions.slice(0, 3) : [summarizeText(body, 90)],
+        output: output || "전체 내용 보기에서 세부 결과물을 확인하세요.",
+      });
+    }
+
+    return steps;
+  }
+
+  function normalizeRoadmapData(data) {
+    const normalized = { ...(data || {}) };
+    if ((!Array.isArray(normalized.steps) || normalized.steps.length === 0) && normalized.raw_text) {
+      const parsedSteps = parseRawRoadmapSteps(normalized.raw_text);
+      if (parsedSteps.length) normalized.steps = parsedSteps;
+    }
+    if (!normalized.summary && normalized.raw_text) {
+      normalized.summary = summarizeText(normalized.raw_text, 170);
+    }
+    return normalized;
+  }
+
+  function openRoadmapDrawer() {
+    const roadmap = state.currentRoadmap;
+    if (!roadmap || !roadmap.raw_text) return;
+
+    elements.roadmapDrawerTitle.textContent = `${state.selectedJob?.title || "선택 직무"} 전체 로드맵`;
+    elements.roadmapDrawerMeta.textContent = [state.profile.major, "AI 생성"]
+      .filter(Boolean)
+      .join(" · ");
+    elements.roadmapDrawerBody.textContent = roadmap.raw_text;
+    elements.roadmapDrawer.classList.remove("is-hidden");
+    elements.roadmapDrawerBackdrop.classList.remove("is-hidden");
+    elements.roadmapDrawer.setAttribute("aria-hidden", "false");
+  }
+
+  function closeRoadmapDrawer() {
+    elements.roadmapDrawer.classList.add("is-hidden");
+    elements.roadmapDrawerBackdrop.classList.add("is-hidden");
+    elements.roadmapDrawer.setAttribute("aria-hidden", "true");
   }
 
   function setStatus(message, kind = "") {
@@ -229,19 +306,13 @@
   function renderChat() {
     const messages = [];
     if (state.selectedJob) {
-      messages.push({ who: "bot", text: `${state.selectedJob.title} 로드맵을 만들기 위해 두 가지만 확인할게요.` });
+      messages.push({ who: "bot", text: `${state.selectedJob.title} 로드맵을 만들기 위해 전공 여부만 확인할게요.` });
     }
     if (state.profile.major) {
       messages.push({ who: "user", text: state.profile.major });
     }
     if (state.chatStep === "major") {
       messages.push({ who: "bot", text: "이 직무는 전공 기반으로 준비하나요, 비전공에서 시작하나요?" });
-    }
-    if (state.profile.goal) {
-      messages.push({ who: "user", text: state.profile.goal === "신입 도전" ? "도전" : "이직" });
-    }
-    if (state.chatStep === "goal") {
-      messages.push({ who: "bot", text: "준비 목적은 처음 도전인가요, 이직 준비인가요?" });
     }
     if (state.chatStep === "loading") {
       messages.push({ who: "bot", text: "답변을 반영해 3단계 로드맵을 생성하고 있습니다." });
@@ -258,31 +329,34 @@
         <button class="choice-btn" data-major="전공자" type="button">전공자</button>
         <button class="choice-btn" data-major="비전공자" type="button">비전공자</button>
       `;
-    } else if (state.chatStep === "goal") {
-      elements.choiceRow.innerHTML = `
-        <button class="choice-btn" data-goal="신입 도전" type="button">도전</button>
-        <button class="choice-btn" data-goal="이직 준비" type="button">이직</button>
-      `;
     } else {
       elements.choiceRow.innerHTML = "";
     }
   }
 
   function renderRoadmap(data) {
-    const steps = data.steps || [];
+    const roadmap = normalizeRoadmapData(data);
+    const steps = roadmap.steps || [];
+    const hasRawText = Boolean(String(roadmap.raw_text || "").trim());
+    const certifications = roadmap.certifications || [];
+    const resources = roadmap.resources || [];
+    const hasExtra = certifications.length > 0 || resources.length > 0;
+    state.currentRoadmap = roadmap;
+
     elements.roadmapShell.innerHTML = `
       <div class="roadmap-head">
         <p class="eyebrow">맞춤 로드맵</p>
         <h2>${escapeHtml(state.selectedJob?.title || "선택 직무")}</h2>
         <div class="answer-summary">
           <span>${escapeHtml(state.profile.major || "-")}</span>
-          <span>${escapeHtml(state.profile.goal || "-")}</span>
+          <span>AI 생성</span>
         </div>
+        ${hasRawText ? '<button class="ghost-btn roadmap-full-btn" data-roadmap-open="true" type="button">전체 내용 보기</button>' : ""}
       </div>
-      <p class="roadmap-summary">${escapeHtml(data.summary || "")}</p>
+      <p class="roadmap-summary">${escapeHtml(roadmap.summary || "")}</p>
       <div class="roadmap-steps">
         ${steps.map((step, index) => `
-          <article class="step-card">
+          <article class="step-card ${hasRawText ? "is-clickable" : ""}" ${hasRawText ? 'data-roadmap-open="true" tabindex="0" role="button" aria-label="전체 로드맵 보기"' : ""}>
             <div class="step-number">${index + 1}</div>
             <div>
               <div class="step-head">
@@ -295,22 +369,30 @@
           </article>
         `).join("")}
       </div>
-      <div class="roadmap-extra">
-        <section>
-          <h3>자격증과 공부방향</h3>
-          <ul>${(data.certifications || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
-        </section>
-        <section>
-          <h3>참고 자료</h3>
-          <ul>${(data.resources || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
-        </section>
-      </div>
+      ${hasExtra ? `
+        <div class="roadmap-extra">
+          ${certifications.length ? `
+            <section>
+              <h3>자격증과 공부방향</h3>
+              <ul>${certifications.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+            </section>
+          ` : ""}
+          ${resources.length ? `
+            <section>
+              <h3>참고 자료</h3>
+              <ul>${resources.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+            </section>
+          ` : ""}
+        </div>
+      ` : ""}
     `;
   }
 
   async function createRoadmap() {
     if (!state.selectedJob) return;
     state.chatStep = "loading";
+    state.currentRoadmap = null;
+    closeRoadmapDrawer();
     renderChat();
     elements.roadmapShell.innerHTML = '<div class="loading-box">로드맵 생성 중...</div>';
 
@@ -322,8 +404,6 @@
           job_id: Number(state.selectedJob.id),
           profile: {
             major: state.profile.major,
-            goal: state.profile.goal,
-            status: state.profile.goal,
           },
         }),
       });
@@ -334,7 +414,8 @@
       renderRoadmap(data.roadmap || {});
       setStatus(`${state.selectedJob.title} 로드맵이 생성되었습니다.`, "success");
     } catch (error) {
-      state.chatStep = "goal";
+      state.chatStep = "major";
+      state.profile.major = "";
       renderChat();
       elements.roadmapShell.innerHTML = `<div class="empty">${escapeHtml(error.message || "로드맵을 생성하지 못했습니다.")}</div>`;
       setStatus(error.message || "로드맵 생성 중 오류가 발생했습니다.", "error");
@@ -345,6 +426,8 @@
     state.selectedJob = job;
     state.profile = {};
     state.chatStep = "major";
+    state.currentRoadmap = null;
+    closeRoadmapDrawer();
     elements.selectedJobPanel.innerHTML = selectedJobMarkup();
     elements.roadmapShell.innerHTML = "";
     renderChat();
@@ -374,6 +457,8 @@
       state.selectedJob = null;
       state.profile = {};
       state.chatStep = "idle";
+      state.currentRoadmap = null;
+      closeRoadmapDrawer();
 
       renderScores();
       renderRadar();
@@ -414,6 +499,7 @@
 
     elements.analyzeBtn.addEventListener("click", analyzePdf);
     elements.backBtn.addEventListener("click", () => {
+      closeRoadmapDrawer();
       showAnalysisView();
       setStatus("추천 결과로 돌아왔습니다.");
     });
@@ -430,12 +516,25 @@
       if (!button) return;
       if (button.dataset.major) {
         state.profile.major = button.dataset.major;
-        state.chatStep = "goal";
-        renderChat();
-      } else if (button.dataset.goal) {
-        state.profile.goal = button.dataset.goal;
         createRoadmap();
       }
+    });
+
+    elements.roadmapShell.addEventListener("click", (event) => {
+      if (event.target.closest("[data-roadmap-open]")) openRoadmapDrawer();
+    });
+
+    elements.roadmapShell.addEventListener("keydown", (event) => {
+      const trigger = event.target.closest("[data-roadmap-open]");
+      if (!trigger || (event.key !== "Enter" && event.key !== " ")) return;
+      event.preventDefault();
+      openRoadmapDrawer();
+    });
+
+    elements.roadmapDrawerClose.addEventListener("click", closeRoadmapDrawer);
+    elements.roadmapDrawerBackdrop.addEventListener("click", closeRoadmapDrawer);
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeRoadmapDrawer();
     });
   }
 
