@@ -60,7 +60,7 @@ SELECT
     enterprising_score,
     conventional_score,
     major_required,
-    job_definition
+    job_information
 FROM JK_job
 """
 
@@ -72,7 +72,7 @@ JOB_FRAME_COLUMNS = [
     "Top3",
     "참고 유사직업(1차)",
     "전공필수",
-    "직무정의",
+    "직무정보",
     *T_SCORE_COLUMNS.values(),
 ]
 
@@ -152,7 +152,7 @@ def normalize_db_job(row: dict) -> dict:
         "Top3": row.get("top3"),
         "참고 유사직업(1차)": "",
         "전공필수": row.get("major_required"),
-        "직무정의": row.get("job_definition"),
+        "직무정보": row.get("job_information"),
         "현실형(R) T": row.get("realistic_score"),
         "탐구형(I) T": row.get("investigative_score"),
         "예술형(A) T": row.get("artistic_score"),
@@ -277,10 +277,27 @@ def summarize_text(text: str, max_length: int = 90) -> str:
     return f"{text[: max_length - 1].rstrip()}…"
 
 
+def extract_job_definition_text(job_information: str) -> str:
+    text = clean_text(job_information)
+    if not text:
+        return ""
+
+    section_match = re.search(
+        r"(?:^|\n)\s*\d+\.\s*직무\s*정의\s*[:：]\s*(.*?)(?=\n\s*\d+\.\s*[^:\n：]+[:：]|\Z)",
+        text,
+        re.S,
+    )
+    if section_match:
+        return re.sub(r"\s+", " ", section_match.group(1)).strip()
+
+    text = re.sub(r"^\s*\d+\.\s*직무\s*정의\s*[:：]\s*", "", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def build_job_full_description(row: pd.Series) -> str:
-    definition = clean_text(row.get("직무정의"))
-    if definition:
-        return definition
+    information = clean_text(row.get("직무정보"))
+    if information:
+        return information
 
     related = clean_text(row.get("참고 유사직업(1차)", ""))
     top3 = ", ".join(parse_top3_codes(row.get("Top3")))
@@ -301,7 +318,7 @@ def build_job_full_description(row: pd.Series) -> str:
 def serialize_job(row: pd.Series, rank: int | None = None) -> dict:
     scores = {label: safe_float(row.get(column), 0.0) for label, column in T_SCORE_COLUMNS.items()}
     full_description = build_job_full_description(row)
-    summary = summarize_text(full_description)
+    summary = summarize_text(extract_job_definition_text(full_description) or full_description)
     return {
         "id": serialize_job_id(row.get("id"), row.name),
         "rank": rank,
@@ -312,8 +329,8 @@ def serialize_job(row: pd.Series, rank: int | None = None) -> dict:
         "related_jobs": clean_text(row.get("참고 유사직업(1차)")),
         "major_required": clean_text(row.get("전공필수")),
         "description": summary,
-        "definition_summary": summary,
-        "job_definition": full_description,
+        "information_summary": summary,
+        "job_information": full_description,
         "tags": build_job_tags(row),
         "scores": scores,
         "final_score": safe_float(row.get("최종유사도"), None),
@@ -398,7 +415,7 @@ def recommend_jobs_for_user_profile(
             "Top3",
             "참고 유사직업(1차)",
             "전공필수",
-            "직무정의",
+            "직무정보",
             *score_cols,
         ]
     ].copy()
@@ -434,7 +451,7 @@ def search_jobs(query: str, limit: int = 12) -> list[dict]:
             WHERE JK_L_category LIKE %s
                OR JK_M_category LIKE %s
                OR similar_job_name LIKE %s
-               OR job_definition LIKE %s
+               OR job_information LIKE %s
             ORDER BY id
             LIMIT %s
             """,
