@@ -8,7 +8,16 @@
 조선시대를 배경으로 한 초개인화 직무 전환 및 취업 로드맵 제안 서비스입니다. 사용자의 직업선호도검사(L형) 결과 PDF를 분석하여 가장 적합한 직무를 추천하고, AI 대감이 개인별 맞춤형 커리어 로드맵을 작성해 줍니다.
 
 ### 🚀 주요 기능
-1. **문서 바치기 (PDF 분석 및 가이드)**: 
+1. **신분 인증 (Google 소셜 로그인)**: 
+   - Supabase Auth를 연동하여 Google 계정으로 간편하게 로그인하고 본인의 데이터를 관리할 수 있습니다.
+2. **📜 나만의 비기 저장 (데이터 영구 보존)**: 
+   - 생성된 AI 로드맵과 RIASEC 점수를 Supabase DB에 자동으로 저장합니다.
+   - '나의 기록' 메뉴를 통해 과거에 생성했던 로드맵을 언제든 다시 꺼내 볼 수 있습니다.
+3. **🗑️ 기록 관리 (삭제 기능)**: 
+   - 불필요하거나 잘못 생성된 로드맵 기록을 직접 삭제하여 목록을 정리할 수 있습니다.
+4. **🏠 원클릭 귀환 (처음으로 돌아가기)**: 
+   - 로드맵 확인 후 첫 화면으로 즉시 돌아갈 수 있는 내비게이션 기능을 추가하여 사용성을 개선했습니다.
+5. **문서 바치기 (PDF 분석 및 가이드)**: 
    - 워크넷 직업선호도검사(L형) 결과지를 업로드하면 흥미 유형(RIASEC) 점수를 자동으로 추출합니다.
    - 처음 방문하는 사용자를 위해 고용24 검사 방법 및 PDF 다운로드 안내 가이드를 대화창에 추가했습니다.
 2. **⚖️ RIASEC 시각적 분석 UI**: 
@@ -29,6 +38,7 @@
 ### 🛠 기술 스택
 - **Backend**: FastAPI (Python 3.10+)
 - **Frontend**: HTML5, Vanilla JS, CSS3 (NES.css 라이브러리 활용)
+- **Database & Auth**: Supabase (PostgreSQL, JWT 인증)
 - **AI**: OpenAI API (GPT-4o-mini)
 - **Data Analysis**: Pandas, NumPy, Scikit-learn
 - **PDF Processing**: PyPDF
@@ -52,7 +62,12 @@
 
 ```bash
 # 필요한 라이브러리 설치
-pip install fastapi uvicorn pandas numpy python-dotenv pypdf openai
+pip install fastapi uvicorn pandas numpy python-dotenv pypdf openai supabase
+
+# .env 파일 설정
+# OPENAI_API_KEY=...
+# SUPABASE_URL=...
+# SUPABASE_ANON_KEY=...
 
 # 서버 실행
 python main.py

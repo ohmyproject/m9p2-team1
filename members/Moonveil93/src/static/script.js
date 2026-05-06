@@ -1,3 +1,140 @@
+// --- Supabase 초기화 ---
+let supabaseClient = null;
+let currentSession = null;
+let lastScores = null; // 최근 추출된 RIASEC 점수 저장
+
+async function initSupabase() {
+    const url = "https://fbpkizfwmvaevktdqwqj.supabase.co";
+    const key = "sb_publishable_PPuYu0NRP2VRtqCgZ_zO2w_HV-OnnPC";
+    
+    supabaseClient = supabase.createClient(url, key);
+
+    supabaseClient.auth.onAuthStateChange((event, session) => {
+        currentSession = session;
+        updateAuthUI(session);
+    });
+
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    currentSession = session;
+    updateAuthUI(session);
+}
+
+function updateAuthUI(session) {
+    const userInfo = document.getElementById('user-info');
+    const loginButtons = document.getElementById('login-buttons');
+    const userName = document.getElementById('user-name');
+
+    if (session) {
+        userInfo.classList.remove('hidden');
+        loginButtons.classList.add('hidden');
+        userName.innerText = session.user.user_metadata.full_name || session.user.email;
+    } else {
+        userInfo.classList.add('hidden');
+        loginButtons.classList.remove('hidden');
+    }
+}
+
+async function handleSignIn(provider) {
+    const { error } = await supabaseClient.auth.signInWithOAuth({
+        provider: provider,
+        options: { redirectTo: window.location.origin }
+    });
+    if (error) alert("로그인 오류: " + error.message);
+}
+
+async function handleSignOut() {
+    const { error } = await supabaseClient.auth.signOut();
+    if (error) alert("로그아웃 오류: " + error.message);
+}
+
+// 과거 기록 조회 기능
+async function showHistory() {
+    if (!currentSession) return;
+    
+    const historyModal = document.getElementById('history-modal');
+    const historyList = document.getElementById('history-list');
+    historyList.innerHTML = "<p>기록을 불러오는 중이옵니다...</p>";
+    historyModal.classList.remove('hidden');
+
+    try {
+        const response = await fetch('/api/my_roadmaps', {
+            headers: { 'Authorization': `Bearer ${currentSession.access_token}` }
+        });
+        const data = await response.json();
+
+        if (data.status === 'success') {
+            historyList.innerHTML = "";
+            if (data.data.length === 0) {
+                historyList.innerHTML = "<p>아직 저장된 로드맵이 없사옵니다.</p>";
+                return;
+            }
+
+            data.data.forEach(item => {
+                const date = new Date(item.created_at).toLocaleDateString();
+                const div = document.createElement('div');
+                div.className = "nes-container is-rounded with-title";
+                div.style.marginBottom = "20px";
+                div.style.background = "#fff";
+                div.style.color = "#000";
+                
+                div.innerHTML = `
+                    <p class="title">${date} - ${item.job_name}</p>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span>기록된 로드맵을 다시 확인하시겠소?</span>
+                        <div style="display: flex; gap: 10px;">
+                            <button type="button" class="nes-btn is-primary" onclick='viewSavedRoadmap(${JSON.stringify(item).replace(/'/g, "&apos;")})'>보기</button>
+                            <button type="button" class="nes-btn is-error" onclick="deleteSavedRoadmap('${item.id}', this)">삭제</button>
+                        </div>
+                    </div>
+                `;
+                historyList.appendChild(div);
+            });
+        } else {
+            historyList.innerHTML = "<p>오류: " + data.message + "</p>";
+        }
+    } catch (error) {
+        historyList.innerHTML = "<p>서버 연결 실패!</p>";
+    }
+}
+
+async function deleteSavedRoadmap(roadmapId, btnElement) {
+    if (!confirm("정말로 이 기록을 삭제하시겠소? 한 번 지우면 되돌릴 수 없느니라.")) return;
+
+    try {
+        const response = await fetch(`/api/delete_roadmap/${roadmapId}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${currentSession.access_token}` }
+        });
+        const data = await response.json();
+
+        if (data.status === 'success') {
+            alert("기록이 삭제되었느니라.");
+            // 리스트에서 해당 항목 제거
+            btnElement.closest('.nes-container').remove();
+            
+            // 만약 리스트가 비었다면 메시지 표시
+            const historyList = document.getElementById('history-list');
+            if (historyList.children.length === 0) {
+                historyList.innerHTML = "<p>아직 저장된 로드맵이 없사옵니다.</p>";
+            }
+        } else {
+            alert("삭제 실패: " + data.message);
+        }
+    } catch (error) {
+        alert("서버 연결 실패!");
+    }
+}
+
+function viewSavedRoadmap(item) {
+    document.getElementById('history-modal').classList.add('hidden');
+    selectedJob = { JK중분류: item.job_name };
+    renderScores(item.riasec_scores || {});
+    renderRoadmapFromText(item.roadmap_text);
+    nextPhase(6);
+}
+
+document.addEventListener('DOMContentLoaded', initSupabase);
+
 const dialogues = {
     2: "어서오거라! 관아에서 받아온 네놈의 자질 문서(PDF)를 보여다오!\n(고용24 직업선호도검사 L형 설문을 완료 후 PDF 결과지를 다운 받아 첨부해주세요.)",
     3: "오호, 너의 기질을 해독해 보았느니라.\n한번 확인해 보겠느냐?",
@@ -6,8 +143,8 @@ const dialogues = {
     7: "이 직무가 어떤 일을 하는지 자세히 읽어보게나. 마음에 드는가?"
 };
 
-let selectedJob = null; // 선택한 직무 저장
-let tempRecommendations = []; // 추천 데이터를 임시 저장
+let selectedJob = null;
+let tempRecommendations = [];
 
 function typeWriter(text, elementId, callback) {
     let i = 0;
@@ -15,16 +152,11 @@ function typeWriter(text, elementId, callback) {
     element.innerHTML = "";
     function type() {
         if (i < text.length) {
-            if (text.charAt(i) === '\n') {
-                element.innerHTML += '<br>';
-            } else {
-                element.innerHTML += text.charAt(i);
-            }
+            if (text.charAt(i) === '\n') { element.innerHTML += '<br>'; }
+            else { element.innerHTML += text.charAt(i); }
             i++;
-            setTimeout(type, 30); // 타이핑 속도 조절
-        } else if (callback) {
-            callback();
-        }
+            setTimeout(type, 30);
+        } else if (callback) { callback(); }
     }
     type();
 }
@@ -34,7 +166,6 @@ function nextPhase(phaseNum) {
     const currentPhase = document.getElementById(`phase-${getPhaseId(phaseNum)}`);
     currentPhase.classList.add('active');
 
-    // 입력/버튼 영역 숨기기 (타이핑 끝난 후 표시)
     const actionArea = document.getElementById(`action-${phaseNum}`);
     if(actionArea) actionArea.classList.add('hidden');
 
@@ -49,13 +180,9 @@ function getPhaseId(num) {
     return ["", "intro", "upload", "scores", "results", "major", "roadmap", "job-detail"][num];
 }
 
-// 📌 API 호출: PDF 업로드
 async function handleUpload() {
     const fileInput = document.getElementById('pdf-input');
-    if (!fileInput.files.length) {
-        alert("문서를 선택해 주시게!");
-        return;
-    }
+    if (!fileInput.files.length) { alert("문서를 선택해 주시게!"); return; }
 
     const formData = new FormData();
     formData.append('file', fileInput.files[0]);
@@ -64,47 +191,33 @@ async function handleUpload() {
     document.getElementById('action-2').classList.add('hidden');
 
     try {
-        const response = await fetch('/api/upload_pdf', {
-            method: 'POST',
-            body: formData
-        });
+        const response = await fetch('/api/upload_pdf', { method: 'POST', body: formData });
         const data = await response.json();
         
         if (data.status === 'success') {
-            tempRecommendations = data.recommendations; // 추천 데이터 보관
-            renderScores(data.scores);                 // 점수 화면 그리기
-            nextPhase(3);                             // 점수 확인 단계(scores)로 이동
+            tempRecommendations = data.recommendations;
+            lastScores = data.scores;
+            renderScores(data.scores);
+            nextPhase(3);
         } else {
             alert("오류 발생: " + data.message);
             document.getElementById('action-2').classList.remove('hidden');
         }
-    } catch (error) {
-        alert("서버 연결 실패!");
-    }
+    } catch (error) { alert("서버 연결 실패!"); }
 }
 
-// 점수를 화면에 그리는 함수
 function renderScores(scores) {
     const RL = [
-        { name: "현실형", k: "R" },
-        { name: "탐구형", k: "I" },
-        { name: "예술형", k: "A" },
-        { name: "사회형", k: "S" },
-        { name: "진취형", k: "E" },
-        { name: "관습형", k: "C" }
+        { name: "현실형", k: "R" }, { name: "탐구형", k: "I" }, { name: "예술형", k: "A" },
+        { name: "사회형", k: "S" }, { name: "진취형", k: "E" }, { name: "관습형", k: "C" }
     ];
     
-    // API 데이터에서 표준점수 추출 및 매핑
     const stdScores = {
-        "R": scores["현실형"]?.표준점수 || 0,
-        "I": scores["탐구형"]?.표준점수 || 0,
-        "A": scores["예술형"]?.표준점수 || 0,
-        "S": scores["사회형"]?.표준점수 || 0,
-        "E": scores["진취형"]?.표준점수 || 0,
-        "C": scores["관습형"]?.표준점수 || 0
+        "R": scores["현실형"]?.표준점수 || 0, "I": scores["탐구형"]?.표준점수 || 0,
+        "A": scores["예술형"]?.표준점수 || 0, "S": scores["사회형"]?.표준점수 || 0,
+        "E": scores["진취형"]?.표준점수 || 0, "C": scores["관습형"]?.표준점수 || 0
     };
 
-    /* --- 막대 그래프(게이지 바) 생성 부분 --- */
     const maxStd = Math.max(...RL.map(l => stdScores[l.k] || 0), 1);
     document.getElementById('barsDiv').innerHTML = RL.map(l => {
       const v = stdScores[l.k] || 0;
@@ -116,10 +229,9 @@ function renderScores(scores) {
       </div>`;
     }).join('');
 
-    /* --- 하단 흥미 코드 및 성향 텍스트 생성 부분 --- */
     const sorted = [...RL].sort((a, b) => (stdScores[b.k] || 0) - (stdScores[a.k] || 0));
     const t3 = sorted.slice(0, 3).map(l => l.k).join('');
-    const repCode = sorted[0].k; // 가장 높은 점수의 코드를 대표코드로 설정
+    const repCode = sorted[0].k;
 
     document.getElementById('top3Div').innerHTML = `
         <div class="seal-box">
@@ -127,36 +239,24 @@ function renderScores(scores) {
         </div>`;
 }
 
-// 점수 확인 후 추천 페이지로 넘어가는 함수
 function goToRecommendations() {
-    renderJobList(tempRecommendations); // 보관해둔 데이터로 목록 생성
-    nextPhase(4);                      // 결과 확인 단계(results)로 이동
+    renderJobList(tempRecommendations);
+    nextPhase(4);
 }
 
-// 직무 상세 정보를 화면에 그리는 함수
 function showJobDetail(job, fromPhase) {
     selectedJob = job;
-    
-    // 제목 및 내용 설정
     document.getElementById('detail-title').innerText = `📜 ${job.JK중분류} 상세 정보`;
-    
-    // 직무정보 텍스트 가공 (줄바꿈 등)
     const infoText = job.직무정보 ? job.직무정보.replace(/\n/g, '<br>') : "상세 정보가 없사옵니다.";
     document.getElementById('detail-content').innerHTML = infoText;
-    
-    // '다시 목록으로' 버튼 동작 설정
     const backBtn = document.getElementById('back-to-list-btn');
     backBtn.onclick = () => nextPhase(fromPhase);
-    
-    // 상세 페이지(Phase 7)로 이동
     nextPhase(7);
 }
 
-// 방보(결과) 리스트 그리기
 function renderJobList(jobs) {
     const container = document.getElementById('job-list');
     container.innerHTML = "";
-    
     jobs.forEach((job, index) => {
         const btn = document.createElement('button');
         btn.className = "nes-btn";
@@ -165,91 +265,74 @@ function renderJobList(jobs) {
         btn.style.marginBottom = "10px";
         btn.style.textAlign = "left";
         btn.innerText = `${index + 1}. ${job.JK중분류} (일치율: ${Math.round(job.최종유사도 * 100)}%)`;
-        
-        btn.onclick = () => {
-            showJobDetail(job, 4); // 상세 페이지로 이동
-        };
+        btn.onclick = () => { showJobDetail(job, 4); };
         container.appendChild(btn);
     });
 }
 
-// 📌 API 호출: AI 로드맵 생성
 async function showRoadmap(answer) {
-    if (!selectedJob) {
-        alert("선택된 직무가 없사옵니다!");
-        return;
-    }
+    if (!selectedJob) { alert("선택된 직무가 없사옵니다!"); return; }
 
-    // 1. 대화창 텍스트 변경 및 버튼 숨기기
     document.getElementById('typewriter-5').innerText = "AI 대감이 맞춤형 신분 상승의 길을 점치고 있사옵니다...\n잠시만 기다려 주시옵소서.";
     document.getElementById('action-5').classList.add('hidden');
 
-    // 2. 백엔드로 보낼 데이터 준비
     const requestData = {
         job_name: selectedJob.JK중분류,
         is_major_required: selectedJob.전공필수 === 'O',
-        user_major_status: answer 
+        user_major_status: answer,
+        riasec_scores: lastScores
     };
 
     try {
-        // 3. FastAPI 백엔드 호출
+        const headers = { 'Content-Type': 'application/json' };
+        if (currentSession) { headers['Authorization'] = `Bearer ${currentSession.access_token}`; }
+
         const response = await fetch('/api/roadmap', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: headers,
             body: JSON.stringify(requestData)
         });
 
         const data = await response.json();
 
-        // --- 4. 성공 시 로직 교체 시작 ---
-if (data.status === 'success') {
-    nextPhase(6); // roadmap 단계로 이동
+        if (data.status === 'success') {
+            renderRoadmapFromText(data.roadmap);
+            nextPhase(6);
+        } else {
+            alert("오류 발생: " + data.message);
+            document.getElementById('action-5').classList.remove('hidden');
+        }
+    } catch (error) {
+        alert("서버 연결 실패!");
+        document.getElementById('action-5').classList.remove('hidden');
+    }
+}
+
+function renderRoadmapFromText(rawText) {
     const container = document.getElementById('roadmap-content');
-    container.innerHTML = ""; // 기존 내용 초기화
-    container.style.transform = "translateX(0)"; // 슬라이드 위치 초기화
+    container.innerHTML = "";
+    container.style.transform = "translateX(0)";
     currentSlide = 0;
 
-    const rawText = data.roadmap;
-
-    // 🌟 1. 더 강력한 정규식으로 텍스트 분리 ('■', '###', '1단계' 등 어떤 형식이든 잘라냄)
-    const sections = rawText.split(/(?=(?:■|#|\*)*\s*\d+단계)/g)
-                             .map(s => s.trim())
-                             .filter(s => s.length > 20); // 20자 미만의 짧은 기호나 빈 줄은 버림
-    
-     // 2. 만약 첫 번째 조각(도입부)이 너무 짧으면 두 번째 조각(1단계)과 합치기
-     if (sections.length > 1 && !sections[0].includes("1단계") && sections[0].length < 100) {
+    const sections = rawText.split(/(?=(?:■|#|\*)*\s*\d+단계)/g).map(s => s.trim()).filter(s => s.length > 20);
+    if (sections.length > 1 && !sections[0].includes("1단계") && sections[0].length < 100) {
          sections[1] = sections[0] + "\n\n" + sections[1];
          sections.shift();
     }
-    // 전체 슬라이드 개수 설정
     totalSlides = sections.length;
-    updateSlideButtons(); // 화살표 버튼 상태 갱신
+    updateSlideButtons();
 
     sections.forEach(section => {
-        const lines = section.trim().split('\n');
-        
-        // 2. 제목과 본문 분리 (N단계 패턴을 최우선으로 확인)
         let titleText = "";
         let bodyContent = "";
-
-        // '숫자단계' 패턴 찾기 (문장 중간에 있어도 찾을 수 있도록 g 옵션 없이 match)
         const stepMatch = section.match(/(\d+)단계[:\s]*(.*)/);
 
         if (stepMatch) {
-            // 단계 정보가 발견되면 '제N관문' 타이틀 부여
-            titleText = `제${stepMatch[1]}관문: ${stepMatch[2].split('\n')[0].trim()}`;
-            titleText = titleText.replace(/^[■#*]+\s*/, ''); 
-            
-            // 본문에서 제목으로 쓰인 첫 줄(단계 선언부) 제거
+            titleText = `제${stepMatch[1]}관문: ${stepMatch[2].split('\n')[0].trim()}`.replace(/^[■#*]+\s*/, '');
             const firstLineIndex = section.indexOf(stepMatch[0]);
             let remainingText = section.substring(firstLineIndex + stepMatch[0].length).trim();
             
-            // 🌟 [수정된 부분] 본문, 결과물, 팁 3문단으로 더 정확하게 분리하기 🌟
-            let descText = remainingText;
-            let resultText = "";
-            let tipText = "";
-
-            // 1. '현실적 Tip' 분리 (앞뒤의 마크다운 기호 **, #, * 등을 모두 포함하여 탐욕적으로 검색)
+            let descText = remainingText, resultText = "", tipText = "";
             const tipRegex = /(?:[\s\n*#■-]*💡)?[\s\n*#■-]*현실적\s*[Tt]ip[\s\n:*#■-]*/i;
             const tipMatch = descText.match(tipRegex);
             if (tipMatch) {
@@ -257,8 +340,6 @@ if (data.status === 'success') {
                 tipText = descText.substring(splitIdx + tipMatch[0].length).trim();
                 descText = descText.substring(0, splitIdx).trim();
             }
-
-            // 2. '결과물' 분리 (앞뒤의 마크다운 기호 **, #, * 등을 모두 포함하여 탐욕적으로 검색)
             const resultRegex = /(?:[\s\n*#■-]*📌)?[\s\n*#■-]*결과물[\s\n:*#■-]*/i;
             const resultMatch = descText.match(resultRegex);
             if (resultMatch) {
@@ -266,62 +347,34 @@ if (data.status === 'success') {
                 resultText = descText.substring(splitIdx + resultMatch[0].length).trim();
                 descText = descText.substring(0, splitIdx).trim();
             }
-
-            // 3. 추출된 텍스트 내부에 남아있을 수 있는 잔여 마크다운 닫는 기호(**) 및 특수문자 청소
             resultText = resultText.replace(/^[*#■\-\s:]+|[*#■\-\s:]+$/g, "").trim();
             tipText = tipText.replace(/^[*#■\-\s:]+|[*#■\-\s:]+$/g, "").trim();
-            descText = descText.replace(/[*#■\-\s:]+$/g, "").trim(); // 본문 끝자락 청소
+            descText = descText.replace(/[*#■\-\s:]+$/g, "").trim();
 
-            // 4. 각각의 영역을 디자인된 박스로 감싸기
             let finalBodyHTML = "";
-            
-            // 본문 박스 (.roadmap-desc)
-            if (descText) {
-                finalBodyHTML += `<div class="roadmap-desc">${descText.replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')}</div>`;
-            }
-            // 결과물 박스 (.result-box)
-            if (resultText) {
-                finalBodyHTML += `<div class="result-box"><strong style="color:var(--green-jade);">📌 결과물</strong><br>${resultText.replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')}</div>`;
-            }
-            // 현실적 Tip 박스 (.tip-box)
-            if (tipText) {
-                finalBodyHTML += `<div class="tip-box"><strong style="color:#B36B00;">💡 현실적 Tip</strong><br>${tipText.replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')}</div>`;
-            }
-            
+            if (descText) finalBodyHTML += `<div class="roadmap-desc">${descText.replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')}</div>`;
+            if (resultText) finalBodyHTML += `<div class="result-box"><strong style="color:var(--green-jade);">📌 결과물</strong><br>${resultText.replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')}</div>`;
+            if (tipText) finalBodyHTML += `<div class="tip-box"><strong style="color:#B36B00;">💡 현실적 Tip</strong><br>${tipText.replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')}</div>`;
             bodyContent = finalBodyHTML;
-
         } else {
-            // 단계 정보가 없는 경우에만 도입부 타이틀 부여
             titleText = "📜 입신양명 비기";
-            bodyContent = section.replace(/^[■#*]+\s*/g, '')
-                                 .replace(/\n/g, '<br>')
-                                 .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+            bodyContent = section.replace(/^[■#*]+\s*/g, '').replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
         }
 
-        // 3. NES.css 컨테이너(카드) 동적 생성
         const stageDiv = document.createElement('div');
         stageDiv.className = "nes-container with-title roadmap-stage-card";
-        
         const titleP = document.createElement('p');
-        titleP.className = "title";
-        titleP.innerText = titleText;
-        
+        titleP.className = "title"; titleP.innerText = titleText;
         const contentP = document.createElement('p');
         contentP.innerHTML = bodyContent;
-
-        stageDiv.appendChild(titleP);
-        stageDiv.appendChild(contentP);
+        stageDiv.appendChild(titleP); stageDiv.appendChild(contentP);
         container.appendChild(stageDiv);
     });
 
-    // 1. 전체 페이지 수 1 증가 (검색 슬라이드 포함)
     totalSlides++; 
-
-    // 2. 검색용 마지막 슬라이드 생성
     const searchStage = document.createElement('div');
     searchStage.className = "nes-container with-title roadmap-stage-card";
     searchStage.style.overflow = "hidden";
-    
     searchStage.innerHTML = `
         <p class="title">🔍 다른 길 찾기</p>
         <p>혹시 다른 직무의 로드맵이 궁금하신가?</p>
@@ -329,40 +382,23 @@ if (data.status === 'success') {
             <input type="text" id="search-input" class="nes-input" placeholder="직무명을 입력하게...">
             <button type="button" class="nes-btn" onclick="handleSearch()">검색</button>
         </div>
-        <div id="search-results" class="job-list-container" style="margin-top: 15px; max-height: 250px; overflow-y: auto; width: 95%; margin-left: auto; margin-right: auto;">
-            <!-- 검색 결과 버튼들이 여기에 표시됨 -->
+        <div id="search-results" class="job-list-container" style="margin-top: 15px; max-height: 250px; overflow-y: auto; width: 95%; margin-left: auto; margin-right: auto;"></div>
+        <div style="text-align: center; margin-top: 20px;">
+            <button type="button" class="nes-btn is-warning" onclick="location.reload()">처음으로 돌아가기</button>
         </div>
     `;
-
     container.appendChild(searchStage);
-    updateSlideButtons(); // 버튼 상태 최종 갱신
-} 
-// --- 성공 시 로직 교체 끝 ---
-        
-        else {
-            alert("오류 발생: " + data.message);
-            document.getElementById('action-5').classList.remove('hidden');
-            document.getElementById('typewriter-5').innerText = "호오, 그 길을 가려무나?\n그렇다면 네 이놈, 이 직무와 관련된 학문(전공)을 닦았느냐?";
-        }
-    } catch (error) {
-        console.error(error);
-        alert("서버 연결 실패! AI 대감이 응답하지 않습니다.");
-        document.getElementById('action-5').classList.remove('hidden');
-    }
+    updateSlideButtons();
 }
 
-// 📌 슬라이더 제어 로직
 let currentSlide = 0;
 let totalSlides = 0;
 
 function moveSlide(direction) {
     const container = document.getElementById('roadmap-content');
-
     currentSlide += direction;
     if (currentSlide < 0) currentSlide = 0;
     if (currentSlide >= totalSlides) currentSlide = totalSlides - 1;
-
-    // 픽셀 계산 대신 % 단위를 사용하여 미세한 오차(1px 밀림)를 원천 차단
     container.style.transform = `translateX(-${currentSlide * 100}%)`;
     updateSlideButtons();
 }
@@ -370,92 +406,54 @@ function moveSlide(direction) {
 function updateSlideButtons() {
     const prevBtn = document.querySelector('.slide-prev');
     const nextBtn = document.querySelector('.slide-next');
-
     if (prevBtn) prevBtn.disabled = (currentSlide === 0);
     if (nextBtn) nextBtn.disabled = (currentSlide >= totalSlides - 1 || totalSlides === 0);
 }
 
-// 📌 API 호출: 직무 검색 (Phase 2 전용)
 async function handlePhase2Search() {
     const query = document.getElementById('phase2-search-input').value;
     const resultsContainer = document.getElementById('phase2-search-results');
     const resultsWindow = document.getElementById('phase2-search-results-window');
-    
-    if (!query) {
-        alert("검색어를 입력하시게!");
-        return;
-    }
-
+    if (!query) { alert("검색어를 입력하시게!"); return; }
     try {
         const response = await fetch(`/api/search_job?query=${encodeURIComponent(query)}`);
         const data = await response.json();
-
         if (data.status === 'success') {
             resultsContainer.innerHTML = "";
-            
-            if (data.results.length === 0) {
-                resultsContainer.innerHTML = "<p>그런 직무는 없사옵니다...</p>";
-            } else {
+            if (data.results.length === 0) { resultsContainer.innerHTML = "<p>그런 직무는 없사옵니다...</p>"; }
+            else {
                 data.results.forEach(job => {
                     const btn = document.createElement('button');
-                    btn.className = "nes-btn is-success"; // 초록색으로 변경
-                    btn.style.display = "block";
-                    btn.style.width = "96%"; // 너비 최적화
-                    btn.style.padding = "4px 8px";
-                    btn.style.margin = "0 auto 10px auto"; // 중앙 정렬 및 간격
-                    btn.style.textAlign = "left";
+                    btn.className = "nes-btn is-success";
+                    btn.style.display = "block"; btn.style.width = "96%"; btn.style.padding = "4px 8px";
+                    btn.style.margin = "0 auto 10px auto"; btn.style.textAlign = "left";
                     btn.innerText = job.JK중분류;
-                    
-                    btn.onclick = () => {
-                        resultsWindow.classList.add('hidden'); // 상세 보기 전 팝업 닫기
-                        showJobDetail(job, 2); 
-                    };
+                    btn.onclick = () => { resultsWindow.classList.add('hidden'); showJobDetail(job, 2); };
                     resultsContainer.appendChild(btn);
                 });
             }
-            resultsWindow.classList.remove('hidden'); // 결과창 띄우기
+            resultsWindow.classList.remove('hidden');
         }
-    } catch (error) {
-        alert("검색 중 오류가 발생했사옵니다.");
-    }
+    } catch (error) { alert("검색 중 오류가 발생했사옵니다."); }
 }
 
-// 📌 API 호출: 직무 검색
 async function handleSearch() {
     const query = document.getElementById('search-input').value;
-    if (!query) {
-        alert("검색어를 입력하시게!");
-        return;
-    }
-
+    if (!query) { alert("검색어를 입력하시게!"); return; }
     try {
         const response = await fetch(`/api/search_job?query=${encodeURIComponent(query)}`);
         const data = await response.json();
-
         if (data.status === 'success') {
             const container = document.getElementById('search-results');
             container.innerHTML = "";
-            
-            if (data.results.length === 0) {
-                container.innerHTML = "<p>그런 직무는 없사옵니다...</p>";
-                return;
-            }
-
+            if (data.results.length === 0) { container.innerHTML = "<p>그런 직무는 없사옵니다...</p>"; return; }
             data.results.forEach(job => {
                 const btn = document.createElement('button');
-                btn.className = "nes-btn";
-                btn.style.display = "block";
-                btn.style.width = "90%";
-                btn.style.marginBottom = "10px";
+                btn.className = "nes-btn"; btn.style.display = "block"; btn.style.width = "90%"; btn.style.marginBottom = "10px";
                 btn.innerText = job.JK중분류;
-                btn.onclick = () => {
-                    showJobDetail(job, 6); // 상세 페이지로 이동
-                };
+                btn.onclick = () => { showJobDetail(job, 6); };
                 container.appendChild(btn);
             });
         }
-    } catch (error) {
-        alert("검색 중 오류가 발생했사옵니다.");
-    }
+    } catch (error) { alert("검색 중 오류가 발생했사옵니다."); }
 }
-

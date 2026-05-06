@@ -8,6 +8,8 @@
     <link href="https://unpkg.com/nes.css@latest/css/nes.min.css" rel="stylesheet" />
     <!-- ⚠️ 중요: /static/ 경로 명시 -->
     <link rel="stylesheet" href="/static/style.css">
+    <!-- Supabase JS SDK -->
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
 </head>
 <body>
     <div id="game-container">
@@ -16,6 +18,18 @@
             <div class="background intro-bg"></div>
             <h1 class="game-title"></h1>
             <button type="button" class="start-btn" onclick="nextPhase(2)"></button>
+            
+            <!-- 로그인/사용자 정보 영역 (시작 버튼 아래로 이동) -->
+            <div id="auth-container" style="position: absolute; bottom: 5%; left: 50%; transform: translateX(-50%); z-index: 1000; display: flex; flex-direction: column; gap: 10px; align-items: center;">
+                <div id="user-info" class="hidden" style="color: white; font-size: 14px; background: rgba(0,0,0,0.7); padding: 8px 15px; border-radius: 5px; border: 2px solid #fff;">
+                    <span id="user-name"></span>님 환영합니다!
+                    <button type="button" class="nes-btn is-success is-small" onclick="showHistory()" style="margin-left: 10px;">나의 기록</button>
+                    <button type="button" class="nes-btn is-error is-small" onclick="handleSignOut()" style="margin-left: 10px;">로그아웃</button>
+                </div>
+                <div id="login-buttons" style="display: flex; gap: 15px;">
+                    <button type="button" class="nes-btn is-primary" onclick="handleSignIn('google')">Google 로그인으로 신분 인증</button>
+                </div>
+            </div>
         </section>
 
         <!-- Phase 2: 문서 바치기 -->
@@ -151,6 +165,17 @@
                 </div>
             </div>
         </section>
+
+        <!-- 과거 기록 모달 팝업 -->
+        <div id="history-modal" class="nes-container is-rounded is-dark hidden" style="position: fixed; top: 10%; left: 15%; width: 70%; height: 80%; z-index: 2000; background: #212529; padding: 30px;">
+            <p class="title" style="font-size: 24px; color: #f7d51d;">📜 나의 과거 로드맵 기록</p>
+            <div id="history-list" style="max-height: 80%; overflow-y: auto; margin-top: 20px;">
+                <!-- 기록 리스트가 여기에 동적으로 추가됨 -->
+            </div>
+            <div style="text-align: right; margin-top: 20px;">
+                <button type="button" class="nes-btn is-error" onclick="document.getElementById('history-modal').classList.add('hidden')">닫기</button>
+            </div>
+        </div>
     </div>
 
     <!-- ⚠️ 중요: /static/ 경로 명시 -->
