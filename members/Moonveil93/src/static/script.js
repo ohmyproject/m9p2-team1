@@ -1,5 +1,5 @@
 const dialogues = {
-    2: "어서오거라! 관아에서 받아온 네놈의 자질 문서(PDF)를 보여다오!",
+    2: "어서오거라! 관아에서 받아온 네놈의 자질 문서(PDF)를 보여다오!\n(고용24 직업선호도검사 L형 설문을 완료 후 PDF 결과지를 다운 받아 첨부해주세요.)",
     3: "오호, 너의 기질을 해독해 보았느니라.\n한번 확인해 보겠느냐?",
     4: "방보를 확인하시게. 자네에게 제일 잘 맞을 것 같은 10가지의 일거리 라네.\n어떤일을 하기를 원하는가? 하나 선택해 보게나.",
     5: "호오, 그 일을 해보려는가? \n그렇다면 관련된 학문(전공)은 접해본 적이 있는가?",
@@ -238,15 +238,58 @@ if (data.status === 'success') {
         if (stepMatch) {
             // 단계 정보가 발견되면 '제N관문' 타이틀 부여
             titleText = `제${stepMatch[1]}관문: ${stepMatch[2].split('\n')[0].trim()}`;
-            // 특수기호 제거
             titleText = titleText.replace(/^[■#*]+\s*/, ''); 
             
-            // 본문에서 제목으로 쓰인 첫 줄(단계 선언부) 제거 후 가공
+            // 본문에서 제목으로 쓰인 첫 줄(단계 선언부) 제거
             const firstLineIndex = section.indexOf(stepMatch[0]);
-            const remainingText = section.substring(firstLineIndex + stepMatch[0].length).trim();
+            let remainingText = section.substring(firstLineIndex + stepMatch[0].length).trim();
             
-            bodyContent = remainingText.replace(/\n/g, '<br>')
-                                       .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+            // 🌟 [수정된 부분] 본문, 결과물, 팁 3문단으로 더 정확하게 분리하기 🌟
+            let descText = remainingText;
+            let resultText = "";
+            let tipText = "";
+
+            // 1. '현실적 Tip' 분리 (앞뒤의 마크다운 기호 **, #, * 등을 모두 포함하여 탐욕적으로 검색)
+            const tipRegex = /(?:[\s\n*#■-]*💡)?[\s\n*#■-]*현실적\s*[Tt]ip[\s\n:*#■-]*/i;
+            const tipMatch = descText.match(tipRegex);
+            if (tipMatch) {
+                const splitIdx = descText.indexOf(tipMatch[0]);
+                tipText = descText.substring(splitIdx + tipMatch[0].length).trim();
+                descText = descText.substring(0, splitIdx).trim();
+            }
+
+            // 2. '결과물' 분리 (앞뒤의 마크다운 기호 **, #, * 등을 모두 포함하여 탐욕적으로 검색)
+            const resultRegex = /(?:[\s\n*#■-]*📌)?[\s\n*#■-]*결과물[\s\n:*#■-]*/i;
+            const resultMatch = descText.match(resultRegex);
+            if (resultMatch) {
+                const splitIdx = descText.indexOf(resultMatch[0]);
+                resultText = descText.substring(splitIdx + resultMatch[0].length).trim();
+                descText = descText.substring(0, splitIdx).trim();
+            }
+
+            // 3. 추출된 텍스트 내부에 남아있을 수 있는 잔여 마크다운 닫는 기호(**) 및 특수문자 청소
+            resultText = resultText.replace(/^[*#■\-\s:]+|[*#■\-\s:]+$/g, "").trim();
+            tipText = tipText.replace(/^[*#■\-\s:]+|[*#■\-\s:]+$/g, "").trim();
+            descText = descText.replace(/[*#■\-\s:]+$/g, "").trim(); // 본문 끝자락 청소
+
+            // 4. 각각의 영역을 디자인된 박스로 감싸기
+            let finalBodyHTML = "";
+            
+            // 본문 박스 (.roadmap-desc)
+            if (descText) {
+                finalBodyHTML += `<div class="roadmap-desc">${descText.replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')}</div>`;
+            }
+            // 결과물 박스 (.result-box)
+            if (resultText) {
+                finalBodyHTML += `<div class="result-box"><strong style="color:var(--green-jade);">📌 결과물</strong><br>${resultText.replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')}</div>`;
+            }
+            // 현실적 Tip 박스 (.tip-box)
+            if (tipText) {
+                finalBodyHTML += `<div class="tip-box"><strong style="color:#B36B00;">💡 현실적 Tip</strong><br>${tipText.replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')}</div>`;
+            }
+            
+            bodyContent = finalBodyHTML;
+
         } else {
             // 단계 정보가 없는 경우에만 도입부 타이틀 부여
             titleText = "📜 입신양명 비기";
@@ -257,7 +300,7 @@ if (data.status === 'success') {
 
         // 3. NES.css 컨테이너(카드) 동적 생성
         const stageDiv = document.createElement('div');
-        stageDiv.className = "nes-container with-title is-dark roadmap-stage-card";
+        stageDiv.className = "nes-container with-title roadmap-stage-card";
         
         const titleP = document.createElement('p');
         titleP.className = "title";
@@ -276,16 +319,17 @@ if (data.status === 'success') {
 
     // 2. 검색용 마지막 슬라이드 생성
     const searchStage = document.createElement('div');
-    searchStage.className = "nes-container with-title is-dark roadmap-stage-card";
-
+    searchStage.className = "nes-container with-title roadmap-stage-card";
+    searchStage.style.overflow = "hidden";
+    
     searchStage.innerHTML = `
         <p class="title">🔍 다른 길 찾기</p>
         <p>혹시 다른 직무의 로드맵이 궁금하신가?</p>
         <div class="nes-field is-inline" style="margin-top: 20px;">
             <input type="text" id="search-input" class="nes-input" placeholder="직무명을 입력하게...">
-            <button type="button" class="nes-btn is-primary" onclick="handleSearch()">검색</button>
+            <button type="button" class="nes-btn" onclick="handleSearch()">검색</button>
         </div>
-        <div id="search-results" class="job-list-container" style="margin-top: 15px; max-height: 300px; overflow-y: auto;">
+        <div id="search-results" class="job-list-container" style="margin-top: 15px; max-height: 250px; overflow-y: auto; width: 95%; margin-left: auto; margin-right: auto;">
             <!-- 검색 결과 버튼들이 여기에 표시됨 -->
         </div>
     `;
@@ -313,13 +357,13 @@ let totalSlides = 0;
 
 function moveSlide(direction) {
     const container = document.getElementById('roadmap-content');
-    const slideWidth = document.querySelector('.roadmap-stage-card').offsetWidth + 20; // 카드 너비 + 간격
 
     currentSlide += direction;
     if (currentSlide < 0) currentSlide = 0;
     if (currentSlide >= totalSlides) currentSlide = totalSlides - 1;
 
-    container.style.transform = `translateX(-${currentSlide * slideWidth}px)`;
+    // 픽셀 계산 대신 % 단위를 사용하여 미세한 오차(1px 밀림)를 원천 차단
+    container.style.transform = `translateX(-${currentSlide * 100}%)`;
     updateSlideButtons();
 }
 
@@ -329,6 +373,51 @@ function updateSlideButtons() {
 
     if (prevBtn) prevBtn.disabled = (currentSlide === 0);
     if (nextBtn) nextBtn.disabled = (currentSlide >= totalSlides - 1 || totalSlides === 0);
+}
+
+// 📌 API 호출: 직무 검색 (Phase 2 전용)
+async function handlePhase2Search() {
+    const query = document.getElementById('phase2-search-input').value;
+    const resultsContainer = document.getElementById('phase2-search-results');
+    const resultsWindow = document.getElementById('phase2-search-results-window');
+    
+    if (!query) {
+        alert("검색어를 입력하시게!");
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/search_job?query=${encodeURIComponent(query)}`);
+        const data = await response.json();
+
+        if (data.status === 'success') {
+            resultsContainer.innerHTML = "";
+            
+            if (data.results.length === 0) {
+                resultsContainer.innerHTML = "<p>그런 직무는 없사옵니다...</p>";
+            } else {
+                data.results.forEach(job => {
+                    const btn = document.createElement('button');
+                    btn.className = "nes-btn is-success"; // 초록색으로 변경
+                    btn.style.display = "block";
+                    btn.style.width = "96%"; // 너비 최적화
+                    btn.style.padding = "4px 8px";
+                    btn.style.margin = "0 auto 10px auto"; // 중앙 정렬 및 간격
+                    btn.style.textAlign = "left";
+                    btn.innerText = job.JK중분류;
+                    
+                    btn.onclick = () => {
+                        resultsWindow.classList.add('hidden'); // 상세 보기 전 팝업 닫기
+                        showJobDetail(job, 2); 
+                    };
+                    resultsContainer.appendChild(btn);
+                });
+            }
+            resultsWindow.classList.remove('hidden'); // 결과창 띄우기
+        }
+    } catch (error) {
+        alert("검색 중 오류가 발생했사옵니다.");
+    }
 }
 
 // 📌 API 호출: 직무 검색
@@ -354,9 +443,9 @@ async function handleSearch() {
 
             data.results.forEach(job => {
                 const btn = document.createElement('button');
-                btn.className = "nes-btn is-primary";
+                btn.className = "nes-btn";
                 btn.style.display = "block";
-                btn.style.width = "100%";
+                btn.style.width = "90%";
                 btn.style.marginBottom = "10px";
                 btn.innerText = job.JK중분류;
                 btn.onclick = () => {
@@ -369,3 +458,4 @@ async function handleSearch() {
         alert("검색 중 오류가 발생했사옵니다.");
     }
 }
+

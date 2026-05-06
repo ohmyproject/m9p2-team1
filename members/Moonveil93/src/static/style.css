@@ -36,7 +36,7 @@ body, html {
     width: 90%; left: 5%;
 }
 .dialogue-box { 
-    height: 160px; 
+    height: 220px; /* 기존 160px에서 확대 */
     font-size: 18px; line-height: 1.6;
 }
 .hidden { display: none !important; }
@@ -118,7 +118,7 @@ body, html {
     overflow: hidden; /* 영역 밖으로 나간 카드를 숨김 */
     position: relative;
     border: 4px solid #fff; /* nes-container의 원래 테두리를 여기에 적용 */
-    background-color: #212529;
+    background-color: #f8e5c0;
     padding: 20px;
     box-sizing: border-box;
 }
@@ -135,16 +135,17 @@ body, html {
 
 /* 각 페이지 (슬라이드 1장) */
 .roadmap-stage-card {
-    flex: 0 0 100%; /* 너비를 wrapper와 무조건 100% 동일하게 고정 */
+    flex: 0 0 100%; /* 부모 너비의 정확히 100% 차지 */
     width: 100%;
-    height: cal(100% - 20px);
-    margin: 20px;
-    border: none; /* 외부 래퍼에 테두리가 있으므로 카드 자체 테두리는 제거 */
+    height: 100%;
+    margin: 0;
+    border: none;
     box-sizing: border-box;
     background-color: transparent !important;
     text-align: left;
-    overflow-y: auto; /* 내용이 길면 내부에서만 세로 스크롤 허용 */
-    padding: 40px 40px;
+    overflow-y: auto;
+    overflow-x: hidden; /* 가로 스크롤 및 밀림 방지 */
+    padding: 40px;
 }
 
 /* 스크롤바 숨기기 (더 책 같은 느낌을 줌) */
@@ -152,18 +153,20 @@ body, html {
 .roadmap-stage-card { -ms-overflow-style: none; scrollbar-width: none; }
 
 /* 텍스트 스타일 */
-.roadmap-stage-card p, 
+.roadmap-stage-card div, 
 .roadmap-stage-card strong {
-    font-size: 15px;
+    color: #000 !important;
+    font-size: 18px;
     line-height: 1.7;
     margin-bottom: 10px;
-    display: block;
 }
-.roadmap-stage-card strong { color: #f7d51d; }
+.roadmap-stage-card strong { color: #000 !important; }
 .roadmap-stage-card .title { 
-    font-size: 1.2rem !important; 
+    font-size: 1.5rem !important;
+    font-weight: bold !important; /* 굵게 변경 */
     margin-bottom: 20px;
-    color: #fff;
+    color: #000 !important;
+    background-color: #f8e5c0 !important;
 }
 
 /* --- 슬라이드 좌우 화살표 버튼 스타일 --- */
@@ -243,6 +246,56 @@ body, html {
   --gold-lt: #fff9c4;
   --parchment-dk: #e0c097;
   --stone: #857c6b;
+  --green-jade: #4aa52e;
+  --green-lt: #e6f7ed;
+}
+
+/* --- 로드맵 3단 분리 박스 디자인 --- */
+
+/* 1. 본문 박스 (step-detail 스타일 활용) */
+.roadmap-stage-card .roadmap-desc {
+    background: rgba(245, 230, 200, 0.95);
+    border: 2px solid var(--gold);
+    border-radius: 6px;
+    padding: 15px 20px;
+    margin-bottom: 12px;
+    color: var(--ink);
+    font-size: 17px !important;
+    line-height: 1.8;
+}
+
+/* 2. 결과물 박스 (초록색 띠 스타일) */
+.roadmap-stage-card .result-box {
+    background: var(--green-lt);
+    border-left: 5px solid var(--green-jade);
+    border-radius: 0 6px 6px 0;
+    padding: 15px 20px;
+    margin-bottom: 12px;
+    color: #1A5C35;
+    font-size: 17px !important;
+    line-height: 1.8;
+    box-shadow: 2px 2px 5px rgba(0,0,0,0.05);
+}
+
+/* 3. 현실적 Tip 박스 (주황색 띠 스타일) */
+.roadmap-stage-card .tip-box {
+    background: #fff7e6;
+    border-left: 5px solid #EF9F27;
+    border-radius: 0 6px 6px 0;
+    padding: 15px 20px;
+    margin-bottom: 12px;
+    color: #633806;
+    font-size: 17px !important;
+    line-height: 1.8;
+    box-shadow: 2px 2px 5px rgba(0,0,0,0.05);
+}
+
+/* 텍스트 간격 미세 조정 */
+.roadmap-stage-card .result-box br,
+.roadmap-stage-card .tip-box br {
+    display: block;
+    content: "";
+    margin-top: 6px;
 }
 
 /* 제목 스타일 */
@@ -275,4 +328,45 @@ body, html {
   border-radius: 0 4px 4px 0; padding: 10px 15px; margin: 15px 0;
   font-size: 15px; color: var(--ink); font-weight: 700;
   box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
+}
+/* 팝업 검색창 스타일 */
+.search-popup {
+    position: absolute;
+    bottom: 250px; /* 대화창 높이(220px) + 여백 */
+    padding: 40px 5px 10px 5px !important; /* 상단 패딩 늘림 및 전체 패딩 조정 */
+    right: 5%;
+    width: 280px; /* 너비 축소 */
+    background-color: #f8e5c0 !important;
+    color: #000 !important;
+    z-index: 1000;
+    box-shadow: 0 -5px 15px rgba(0,0,0,0.5);
+    overflow-x: hidden !important;
+    box-sizing: border-box; /* 패딩이 너비에 포함되도록 */
+}
+
+.search-popup .job-list-container {
+    overflow-x: hidden !important;
+    width: 100%;
+}
+
+.search-popup .title {
+    background-color: #f8e5c0 !important;
+    color: #000 !important;
+}
+
+/* 검색 결과 버튼 스타일 */
+#search-results .nes-btn,
+#phase-roadmap .nes-btn.is-primary {
+background-color: #92cc41 !important; /* NES.css success 초록색 */
+color: #fff !important;               /* 흰색 글씨 */
+box-shadow: 4px 4px 0 #000 !important; /* 검정 그림자 */
+border: 4px solid #000 !important;
+}
+
+/* 마우스 올렸을 때 효과 */
+#search-results .nes-btn:hover,
+#phase-roadmap .nes-btn.is-primary:hover {
+background-color: #76a437 !important; /* 조금 더 진한 초록색 */
+color: #000 !important;
+text-decoration: none;
 }

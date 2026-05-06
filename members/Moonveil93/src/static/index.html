@@ -21,12 +21,38 @@
         <!-- Phase 2: 문서 바치기 -->
         <section id="phase-upload" class="phase">
             <div class="background upload-bg"></div>
+            
+            <!-- 플로팅 검색 결과창 (대화창 위쪽에 위치) -->
+            <div id="phase2-search-results-window" class="nes-container is-rounded with-title search-popup hidden">
+                <p class="title">🔍 검색 결과</p>
+                <div id="phase2-search-results" class="job-list-container" style="max-height: 300px; overflow-y: auto;">
+                    <!-- 검색 결과 버튼들이 여기에 표시됨 -->
+                </div>
+                <div style="text-align: right; margin-top: 10px;">
+                    <button type="button" class="nes-btn is-error is-small" onclick="document.getElementById('phase2-search-results-window').classList.add('hidden')">닫기</button>
+                </div>
+            </div>
+
             <div class="dialogue-container">
                 <div class="nes-container is-rounded is-dark dialogue-box">
                     <p id="typewriter-2" class="typewriter-text"></p>
                     <div id="action-2" class="input-area hidden">
-                        <input type="file" id="pdf-input" accept=".pdf" style="color: white;">
-                        <button type="button" class="nes-btn is-success" onclick="handleUpload()">바치기</button>
+                        <div style="display: flex; align-items: center; gap: 15px; width: 100%;">
+                            <!-- PDF 업로드 영역 (좌측 85~90%) -->
+                            <div style="display: flex; align-items: center; gap: 10px; flex: 9;">
+                                <input type="file" id="pdf-input" accept=".pdf" style="color: white; flex: 1;">
+                                <button type="button" class="nes-btn is-success" onclick="handleUpload()">바치기</button>
+                            </div>
+                            
+                            <!-- 구분선 (세로) -->
+                            <div style="width: 2px; height: 30px; background-color: #555;"></div>
+
+                            <!-- 직무 검색 영역 (우측 약 10~15%) -->
+                            <div style="display: flex; align-items: center; gap: 5px; flex: 2;">
+                                <input type="text" id="phase2-search-input" class="nes-input is-dark" placeholder="직무 검색" style="flex: 1; min-width: 80px;">
+                                <button type="button" class="nes-btn is-primary" onclick="handlePhase2Search()" style="padding: 6px 12px;">🔍</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -109,7 +135,7 @@
         <section id="phase-roadmap" class="phase">
             <div class="background roadmap-bg"></div>
             <div class="dialogue-container roadmap-container">
-                <div class="nes-container is-rounded is-dark dialogue-box roadmap-box">
+                <div class="nes-container is-rounded dialogue-box roadmap-box">
                     <button class="slide-btn slide-prev" onclick="moveSlide(-1)" disabled>&lt;</button>
                     <button class="slide-btn slide-next" onclick="moveSlide(1)">&gt;</button>
 
