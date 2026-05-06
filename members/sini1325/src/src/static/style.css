@@ -1,0 +1,496 @@
+/* 둥근모꼴 웹 폰트 적용 */
+@font-face {
+    font-family: 'DungGeunMo';
+    src: url('https://fastly.jsdelivr.net/gh/projectnoonnu/noonfonts_six@1.2/DungGeunMo.woff') format('woff');
+    font-weight: normal;
+    font-style: normal;
+}
+
+body, html {
+    margin: 0; padding: 0;
+    width: 100%; height: 100%;
+    background-color: #212529;
+    font-family: 'DungGeunMo', sans-serif !important;
+}
+
+/* 게임 창 중앙 정렬 및 크기 고정 */
+#game-container {
+    position: relative;
+    width: 1600px; height: 900px;
+    margin: 10px auto;
+    overflow: hidden;
+    border: 6px solid #fff;
+    background-color: #000; /* 배경 이미지 없을 때 대비 */
+    box-shadow: 0 0 20px rgba(0,0,0,0.8);
+}
+
+.phase {
+    display: none; width: 100%; height: 100%;
+    position: absolute; top: 0; left: 0;
+}
+.phase.active { display: block; }
+
+/* 대화창 설정 */
+.dialogue-container {
+    position: absolute; bottom: 15px;
+    width: 90%; left: 5%;
+}
+.dialogue-box { 
+    height: 220px; /* 기존 160px에서 확대 */
+    font-size: 18px; line-height: 1.6;
+}
+.hidden { display: none !important; }
+
+/* 제목 및 버튼 위치 */
+.game-title {
+    position: absolute; top: 30%; width: 100%;
+    text-align: center; color: #f7d51d;
+    text-shadow: 4px 4px #000; font-size: 4rem;
+}
+/* 클릭 시 생기는 파란색 포커스 테두리 완벽 제거 */
+.start-btn:focus, 
+.start-btn:active {
+    outline: none !important; /* 기본 파란색 외곽선 제거 */
+    border: none !important;  /* 테두리 제거 */
+    box-shadow: none !important; /* 혹시 모를 그림자 효과 제거 */
+    background-color: transparent !important; /* 배경색 투명 유지 */
+}
+.start-btn {
+    background: url('/static/start_btn.png') no-repeat center center;
+    background-size: contain;
+    width: 250px;  /* 이미지 가로 크기 */
+    height: 80px;  /* 이미지 세로 크기 */
+    border: none;
+    color: transparent; /* 기존 글자 숨기기 */
+    cursor: pointer;
+    position: absolute;
+    bottom: 20%;
+    left: 50%;
+    transform: translateX(-50%);
+    outline: none !important;
+    -webkit-tap-highlight-color: transparent; /* 모바일에서 터치 시 번쩍이는 효과 제거 */
+}
+
+/* 마우스 올렸을 때 (Hover) */
+.custom-stone-btn:hover {
+    background-color: #b5ac98; /* 살짝 밝아짐 */
+}
+
+/* 클릭했을 때 (Active) - 쑥 들어가는 효과 */
+.custom-stone-btn:active {
+    box-shadow: 
+        inset 4px 4px #857c6b, 
+        inset -4px -4px #c2bba8;
+    padding: 17px 28px 13px 32px; /* 살짝 눌리는 느낌 */
+}
+
+/* 방보 (결과) 창 */
+.notice-board {
+    position: absolute; top: 40px; left: 38%;
+    width: 25%; height: 650px;
+    background-color: #f8e5c0; color: #000;
+    overflow-y: auto;
+    /* ⚠️ 중요: 상단 여백을 주어 글자가 잘리지 않게 합니다 */
+    padding-top: 30px !important;
+}
+.job-list-container { margin-top: 15px; }
+
+/* --- 로드맵 화면 레이아웃 (슬라이드 E-book 형식) --- */
+
+.roadmap-container { 
+    bottom: 10px; 
+    height: 95%; 
+    width: 45%; /* 양옆 화살표 공간 확보 */
+    left: 50%;
+}
+
+.roadmap-box { 
+    height: 100%; 
+    position: relative; /* 화살표 버튼의 기준점 */
+    padding: 0 !important; /* 버튼 밖으로 빼기 위해 패딩 제거 */
+    overflow: visible !important;
+}
+
+/* 슬라이드 래퍼 (이 창문을 통해서만 보임) */
+.roadmap-slider-wrapper {
+    height: 100%;
+    width: 100%;
+    overflow: hidden; /* 영역 밖으로 나간 카드를 숨김 */
+    position: relative;
+    border: 4px solid #fff; /* nes-container의 원래 테두리를 여기에 적용 */
+    background-color: #f8e5c0;
+    padding: 20px;
+    box-sizing: border-box;
+}
+
+/* 기차 트랙 역할 (카드들이 가로로 길게 연결됨) */
+.roadmap-scroll { 
+    display: flex;
+    flex-direction: row; /* 가로 배치 핵심! */
+    height: 100%;
+    width: 100%;
+    transition: transform 0.4s ease-in-out; /* 스르륵 넘어가는 애니메이션 */
+    will-change: transform;
+}
+
+/* 각 페이지 (슬라이드 1장) */
+.roadmap-stage-card {
+    flex: 0 0 100%; /* 부모 너비의 정확히 100% 차지 */
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    border: none;
+    box-sizing: border-box;
+    background-color: transparent !important;
+    text-align: left;
+    overflow-y: auto;
+    overflow-x: hidden; /* 가로 스크롤 및 밀림 방지 */
+    padding: 40px;
+}
+
+/* 스크롤바 숨기기 (더 책 같은 느낌을 줌) */
+.roadmap-stage-card::-webkit-scrollbar { display: none; }
+.roadmap-stage-card { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* 텍스트 스타일 */
+.roadmap-stage-card div, 
+.roadmap-stage-card strong {
+    color: #000 !important;
+    font-size: 18px;
+    line-height: 1.7;
+    margin-bottom: 10px;
+}
+.roadmap-stage-card strong { color: #000 !important; }
+.roadmap-stage-card .title { 
+    font-size: 1.5rem !important;
+    font-weight: bold !important; /* 굵게 변경 */
+    margin-bottom: 20px;
+    color: #000 !important;
+    background-color: #f8e5c0 !important;
+}
+
+/* --- 슬라이드 좌우 화살표 버튼 스타일 --- */
+.slide-btn {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    background-color: #f7d51d; 
+    color: #000;
+    border: 4px solid #000;
+    font-size: 24px;
+    font-weight: bold;
+    cursor: pointer;
+    z-index: 100;
+    width: 50px;
+    height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'DungGeunMo', sans-serif;
+    box-shadow: 4px 4px 0 #000;
+}
+.slide-btn:active { box-shadow: 0 0 0 #000; transform: translateY(-48%); }
+.slide-prev { left: -25px; } /* 왼쪽으로 살짝 튀어나오게 */
+.slide-next { right: -25px; } /* 오른쪽으로 살짝 튀어나오게 */
+.slide-btn:disabled { 
+    background-color: #7a7a7a; 
+    cursor: not-allowed; 
+    box-shadow: none;
+    opacity: 0.5;
+}
+
+/* 배경 이미지 공통 설정 */
+.background {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-size: cover;      /* 화면에 꽉 차게 조절 */
+    background-position: center; /* 가운데 정렬 */
+    background-repeat: no-repeat;
+    image-rendering: pixelated;  /* 픽셀 아트의 선명함을 유지 */
+}
+
+/* 배경 이미지 각 단계별 배경 이미지 지정 */
+/* 파일 확장자가 .png라면 .jpg를 .png로 바꿔주세요 */
+.intro-bg { 
+    background-image: url('/static/intro.jpg'); 
+}
+
+.upload-bg { 
+    background-image: url('/static/upload.png'); 
+}
+
+.notice-bg { 
+    background-image: url('/static/upload.png'); 
+}
+
+.results-bg { 
+    background-image: url('/static/results.jpg'); 
+}
+
+.major-bg { 
+    background-image: url('/static/major.png'); 
+}
+
+.roadmap-bg { 
+    background-image: url('/static/roadmap.jpg'); 
+}
+
+/* --- RIASEC 흥미 유형 분석 디자인 추가 --- */
+:root {
+  --ink: #212529;
+  --gold: #f7d51d;
+  --gold-dk: #d4a017;
+  --gold-lt: #fff9c4;
+  --parchment-dk: #e0c097;
+  --stone: #857c6b;
+  --green-jade: #4aa52e;
+  --green-lt: #e6f7ed;
+}
+
+/* --- 로드맵 3단 분리 박스 디자인 --- */
+
+/* 1. 본문 박스 (step-detail 스타일 활용) */
+.roadmap-stage-card .roadmap-desc {
+    background: rgba(245, 230, 200, 0.95);
+    border: 2px solid var(--gold);
+    border-radius: 6px;
+    padding: 15px 20px;
+    margin-bottom: 12px;
+    color: var(--ink);
+    font-size: 17px !important;
+    line-height: 1.8;
+}
+
+/* 2. 결과물 박스 (초록색 띠 스타일) */
+.roadmap-stage-card .result-box {
+    background: var(--green-lt);
+    border-left: 5px solid var(--green-jade);
+    border-radius: 0 6px 6px 0;
+    padding: 15px 20px;
+    margin-bottom: 12px;
+    color: #1A5C35;
+    font-size: 17px !important;
+    line-height: 1.8;
+    box-shadow: 2px 2px 5px rgba(0,0,0,0.05);
+}
+
+/* 3. 현실적 Tip 박스 (주황색 띠 스타일) */
+.roadmap-stage-card .tip-box {
+    background: #fff7e6;
+    border-left: 5px solid #EF9F27;
+    border-radius: 0 6px 6px 0;
+    padding: 15px 20px;
+    margin-bottom: 12px;
+    color: #633806;
+    font-size: 17px !important;
+    line-height: 1.8;
+    box-shadow: 2px 2px 5px rgba(0,0,0,0.05);
+}
+
+/* 텍스트 간격 미세 조정 */
+.roadmap-stage-card .result-box br,
+.roadmap-stage-card .tip-box br {
+    display: block;
+    content: "";
+    margin-top: 6px;
+}
+
+/* 제목 스타일 */
+.section-title {
+  font-family: 'DungGeunMo', sans-serif; /* 프로젝트 폰트 사용 */
+  font-size: 18px;
+  color: var(--ink);
+  margin-bottom: 12px;
+  padding-bottom: 6px;
+  border-bottom: 2px solid var(--gold);
+  font-weight: bold;
+}
+/* 그래프 가로 배치 및 요소 스타일 */
+.bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.bar-label { font-size: 14px; color: var(--ink); width: 85px; flex-shrink: 0; font-weight: bold; }
+.bar-track {
+  flex: 1; height: 12px; background: #eee;
+  border-radius: 6px; overflow: hidden;
+  border: 1px solid var(--stone);
+}
+.bar-fill {
+  height: 100%; background: linear-gradient(90deg, var(--gold-dk), var(--gold));
+  border-radius: 6px; transition: width .6s ease;
+}
+.bar-val { font-size: 14px; font-weight: 700; color: var(--ink); width: 40px; text-align: right; }
+
+/* 하단 흥미코드 강조 박스 스타일 */
+.seal-box {
+  background: var(--gold-lt); border-left: 5px solid var(--gold);
+  border-radius: 0 4px 4px 0; padding: 10px 15px; margin: 15px 0;
+  font-size: 15px; color: var(--ink); font-weight: 700;
+  box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
+}
+/* 팝업 검색창 스타일 */
+.search-popup {
+    position: absolute;
+    bottom: 250px; /* 대화창 높이(220px) + 여백 */
+    padding: 40px 5px 10px 5px !important; /* 상단 패딩 늘림 및 전체 패딩 조정 */
+    right: 5%;
+    width: 280px; /* 너비 축소 */
+    background-color: #f8e5c0 !important;
+    color: #000 !important;
+    z-index: 1000;
+    box-shadow: 0 -5px 15px rgba(0,0,0,0.5);
+    overflow-x: hidden !important;
+    box-sizing: border-box; /* 패딩이 너비에 포함되도록 */
+}
+
+.search-popup .job-list-container {
+    overflow-x: hidden !important;
+    width: 100%;
+}
+
+.search-popup .title {
+    background-color: #f8e5c0 !important;
+    color: #000 !important;
+}
+
+/* --- Phase 2 두 경로 선택 카드 레이아웃 --- */
+#phase-upload .dialogue-box {
+    height: auto;
+    min-height: 220px;
+}
+
+.upload-options {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    width: 100%;
+    margin-top: 10px;
+}
+
+.upload-option-card {
+    flex: 1;
+    background: rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 4px;
+    padding: 10px 14px;
+}
+
+.option-title {
+    font-size: 14px;
+    font-weight: bold;
+    color: #f7d51d;
+    margin-bottom: 6px;
+}
+
+.option-desc {
+    font-size: 12px;
+    color: #bbb;
+    line-height: 1.5;
+    margin-bottom: 8px;
+}
+
+.option-link {
+    display: block;
+    font-size: 11px;
+    color: #92cc41;
+    text-decoration: none;
+    margin-bottom: 8px;
+}
+.option-link:hover { text-decoration: underline; }
+
+.option-input {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.option-divider {
+    align-self: center;
+    font-size: 13px;
+    color: #555;
+    padding: 0 2px;
+    flex-shrink: 0;
+}
+
+/* --- 직무 상세 정보 카드 레이아웃 (로드맵 스타일 준용) --- */
+.jd-section {
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin-bottom: 12px;
+    box-shadow: 2px 2px 5px rgba(0,0,0,0.06);
+}
+.jd-define {
+    background: rgba(245, 230, 200, 0.9);
+    border: 2px solid var(--gold);
+}
+.jd-role {
+    background: #edf4fb;
+    border-left: 5px solid #3498db;
+    border-radius: 0 6px 6px 0;
+}
+.jd-tasks {
+    background: var(--green-lt);
+    border-left: 5px solid var(--green-jade);
+    border-radius: 0 6px 6px 0;
+}
+.jd-skills {
+    background: #fff7e6;
+    border-left: 5px solid #EF9F27;
+    border-radius: 0 6px 6px 0;
+}
+.jd-section-title {
+    font-size: 16px;
+    font-weight: bold;
+    margin-bottom: 10px;
+    color: var(--ink) !important;
+    border-bottom: 1px solid rgba(0,0,0,0.1);
+    padding-bottom: 6px;
+}
+.jd-section-body {
+    font-size: 15px !important;
+    line-height: 1.7;
+    color: var(--ink) !important;
+}
+.jd-tasks .jd-section-body { color: #1A5C35 !important; }
+.jd-skills .jd-section-body { color: #633806 !important; }
+.jd-para {
+    margin: 4px 0 8px 0;
+    color: inherit !important;
+}
+.jd-list {
+    margin: 4px 0 8px 12px;
+    padding-left: 18px;
+    list-style: disc;
+    color: inherit !important;
+}
+.jd-sublist {
+    margin: 4px 0 4px 8px;
+    padding-left: 16px;
+    list-style: circle;
+    color: inherit !important;
+}
+.jd-list li, .jd-sublist li {
+    margin-bottom: 5px;
+    line-height: 1.6;
+    font-size: 15px !important;
+    color: inherit !important;
+}
+.jd-empty { color: #888; font-size: 15px; }
+
+/* 검색 결과 버튼 스타일 */
+#search-results .nes-btn,
+#phase-roadmap .nes-btn.is-primary {
+background-color: #92cc41 !important; /* NES.css success 초록색 */
+color: #fff !important;               /* 흰색 글씨 */
+box-shadow: 4px 4px 0 #000 !important; /* 검정 그림자 */
+border: 4px solid #000 !important;
+}
+
+/* 마우스 올렸을 때 효과 */
+#search-results .nes-btn:hover,
+#phase-roadmap .nes-btn.is-primary:hover {
+background-color: #76a437 !important; /* 조금 더 진한 초록색 */
+color: #000 !important;
+text-decoration: none;
+}
