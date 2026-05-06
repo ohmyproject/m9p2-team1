@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import tempfile
+from functools import lru_cache
 from pathlib import Path
 
 import fitz  # PyMuPDF
@@ -46,23 +47,7 @@ PDF_SCORE_PATTERN = re.compile(
     re.S,
 )
 
-JOB_SELECT_SQL = """
-SELECT
-    id,
-    JK_L_category,
-    JK_M_category,
-    similar_job_name,
-    top3,
-    realistic_score,
-    investigative_score,
-    artistic_score,
-    social_score,
-    enterprising_score,
-    conventional_score,
-    major_required,
-    job_information
-FROM JK_job
-"""
+SUPABASE_TABLE = "JK_job"
 
 JOB_FRAME_COLUMNS = [
     "id",
@@ -84,63 +69,49 @@ class JobCatalogError(RuntimeError):
 def _required_env(name: str) -> str:
     value = os.getenv(name)
     if value is None or value == "":
-        raise JobCatalogError(f"MySQL 환경변수 {name}가 설정되어 있지 않습니다.")
+        raise JobCatalogError(f"Supabase 환경변수 {name}가 설정되어 있지 않습니다.")
     return value
 
 
-def _int_env(name: str, default: int) -> int:
-    raw_value = os.getenv(name, str(default))
-    try:
-        return int(raw_value)
-    except ValueError as exc:
-        raise JobCatalogError(f"MySQL 환경변수 {name}는 정수여야 합니다.") from exc
+def _supabase_key() -> str:
+    key = (
+        os.getenv("SUPABASE_PUBLISHABLE_KEY")
+        or os.getenv("SUPABASE_ANON_KEY")
+        or os.getenv("SUPABASE_KEY")
+    )
+    if not key:
+        raise JobCatalogError("Supabase 환경변수 SUPABASE_PUBLISHABLE_KEY가 설정되어 있지 않습니다.")
+    return key
 
 
-def get_db_connection():
+@lru_cache(maxsize=1)
+def get_supabase_client():
     try:
-        import pymysql
+        from supabase import create_client
     except ImportError as exc:
-        raise JobCatalogError("pymysql이 설치되어 있지 않습니다. requirements.txt 설치를 확인해주세요.") from exc
+        raise JobCatalogError("supabase가 설치되어 있지 않습니다. requirements.txt 설치를 확인해주세요.") from exc
 
     try:
-        connection_kwargs = {
-            "user": _required_env("MYSQL_USER"),
-            "password": _required_env("MYSQL_PASSWORD"),
-            "database": _required_env("MYSQL_DATABASE"),
-            "charset": "utf8mb4",
-            "cursorclass": pymysql.cursors.DictCursor,
-            "autocommit": True,
-            "connect_timeout": _int_env("MYSQL_CONNECT_TIMEOUT", 5),
-        }
-
-        instance_connection_name = os.getenv("INSTANCE_CONNECTION_NAME", "").strip()
-        if instance_connection_name:
-            return pymysql.connect(
-                unix_socket=f"/cloudsql/{instance_connection_name}",
-                **connection_kwargs,
-            )
-
-        return pymysql.connect(
-            host=_required_env("MYSQL_HOST"),
-            port=_int_env("MYSQL_PORT", 3306),
-            **connection_kwargs,
-        )
+        return create_client(_required_env("SUPABASE_URL"), _supabase_key())
     except JobCatalogError:
         raise
     except Exception as exc:
-        raise JobCatalogError(f"MySQL 연결에 실패했습니다: {exc}") from exc
+        raise JobCatalogError(f"Supabase 연결에 실패했습니다: {exc}") from exc
 
 
-def query_job_rows(sql: str, params: tuple = ()) -> list[dict]:
-    connection = get_db_connection()
+def _execute_job_query(query) -> list[dict]:
     try:
-        with connection.cursor() as cursor:
-            cursor.execute(sql, params)
-            return list(cursor.fetchall())
+        response = query.execute()
+        return list(response.data or [])
     except Exception as exc:
         raise JobCatalogError(f"JK_job 조회 중 오류가 발생했습니다: {exc}") from exc
-    finally:
-        connection.close()
+
+
+def fetch_job_rows(limit: int | None = None) -> list[dict]:
+    query = get_supabase_client().table(SUPABASE_TABLE).select("*").order("id")
+    if limit is not None:
+        query = query.limit(max(1, int(limit)))
+    return _execute_job_query(query)
 
 
 def normalize_db_job(row: dict) -> dict:
@@ -192,7 +163,7 @@ def load_jobs_dataframe(file_path: str | Path | None = None) -> pd.DataFrame:
     if file_path is not None:
         raise JobCatalogError("CSV file_path 로딩은 더 이상 지원하지 않습니다. JK_job DB 테이블을 사용해주세요.")
 
-    rows = query_job_rows(f"{JOB_SELECT_SQL} ORDER BY id")
+    rows = fetch_job_rows()
     records = [normalize_db_job(row) for row in rows]
     return pd.DataFrame(records, columns=JOB_FRAME_COLUMNS)
 
@@ -442,39 +413,42 @@ def search_jobs(query: str, limit: int = 12) -> list[dict]:
     limit = max(1, min(int(limit), 100))
     query = query.strip()
     if not query:
-        rows = query_job_rows(f"{JOB_SELECT_SQL} ORDER BY id LIMIT %s", (limit,))
+        rows = fetch_job_rows(limit=limit)
     else:
-        like_query = f"%{query}%"
-        rows = query_job_rows(
-            f"""
-            {JOB_SELECT_SQL}
-            WHERE JK_L_category LIKE %s
-               OR JK_M_category LIKE %s
-               OR similar_job_name LIKE %s
-               OR job_information LIKE %s
-            ORDER BY id
-            LIMIT %s
-            """,
-            (like_query, like_query, like_query, like_query, limit),
-        )
+        needle = query.casefold()
+        rows = [
+            row
+            for row in fetch_job_rows()
+            if any(
+                needle in clean_text(row.get(field)).casefold()
+                for field in ("JK_L_category", "JK_M_category", "similar_job_name", "job_information")
+            )
+        ][:limit]
     return [serialize_db_job(row) for row in rows]
 
 
 def get_job_by_id(job_id: int) -> dict | None:
-    rows = query_job_rows(f"{JOB_SELECT_SQL} WHERE id = %s LIMIT 1", (job_id,))
+    query = get_supabase_client().table(SUPABASE_TABLE).select("*").eq("id", int(job_id)).limit(1)
+    rows = _execute_job_query(query)
     if not rows:
         return None
     return serialize_db_job(rows[0])
 
 
 def get_job_by_title(title: str) -> dict | None:
-    exact_rows = query_job_rows(f"{JOB_SELECT_SQL} WHERE JK_M_category = %s ORDER BY id LIMIT 1", (title,))
-    if exact_rows:
-        return serialize_db_job(exact_rows[0])
+    title = clean_text(title)
+    rows = fetch_job_rows()
+    exact_row = next((row for row in rows if clean_text(row.get("JK_M_category")) == title), None)
+    if exact_row:
+        return serialize_db_job(exact_row)
 
-    partial_rows = query_job_rows(f"{JOB_SELECT_SQL} WHERE JK_M_category LIKE %s ORDER BY id LIMIT 1", (f"%{title}%",))
-    if partial_rows:
-        return serialize_db_job(partial_rows[0])
+    title_needle = title.casefold()
+    partial_row = next(
+        (row for row in rows if title_needle in clean_text(row.get("JK_M_category")).casefold()),
+        None,
+    )
+    if partial_row:
+        return serialize_db_job(partial_row)
     return None
 
 

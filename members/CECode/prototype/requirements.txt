@@ -3,5 +3,5 @@ python-multipart
 pandas
 numpy
 PyMuPDF
-pymysql
+supabase
 uvicorn

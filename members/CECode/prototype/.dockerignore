@@ -1,6 +1,5 @@
 .env
 .env.*
-.vercel
 .vscode
 __pycache__/
 *.pyc
@@ -12,6 +11,4 @@ __pycache__/
 *.pdf
 *.csv
 CLOUD_RUN_DEPLOY.md
-test.py
-vercel.json
 .cloudrun-env.generated.yaml
