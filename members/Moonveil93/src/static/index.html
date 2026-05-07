@@ -19,17 +19,25 @@
             <h1 class="game-title"></h1>
             <button type="button" class="start-btn" onclick="nextPhase(2)"></button>
             
-            <!-- 로그인/사용자 정보 영역 (시작 버튼 아래로 이동) -->
-            <div id="auth-container" style="position: absolute; bottom: 5%; left: 50%; transform: translateX(-50%); z-index: 1000; display: flex; flex-direction: column; gap: 10px; align-items: center;">
-                <div id="user-info" class="hidden" style="color: white; font-size: 14px; background: rgba(0,0,0,0.7); padding: 8px 15px; border-radius: 5px; border: 2px solid #fff;">
-                    <span id="user-name"></span>님 환영합니다!
-                    <button type="button" class="nes-btn is-success is-small" onclick="showHistory()" style="margin-left: 10px;">나의 기록</button>
-                    <button type="button" class="nes-btn is-error is-small" onclick="handleSignOut()" style="margin-left: 10px;">로그아웃</button>
-                </div>
-                <div id="login-buttons" style="display: flex; gap: 15px;">
-                    <button type="button" class="nes-btn is-primary" onclick="handleSignIn('google')">Google 로그인으로 신분 인증</button>
-                </div>
+            <!-- 로그인 후: 우측 상단 배지 -->
+            <div id="user-info" class="hidden auth-badge-top">
+                🔖 <span id="user-name"></span>님 환영합니다
+                <button type="button" class="auth-small-btn" onclick="showHistory()">나의 기록</button>
+                <button type="button" class="auth-small-btn auth-small-btn--danger" onclick="handleSignOut()">로그아웃</button>
             </div>
+
+            <!-- 로그인 전: 추천 시작 버튼 위에 같은 스타일 -->
+            <div id="login-buttons">
+                <button
+                    type="button"
+                    class="login-btn"
+                    aria-label="Google로 로그인하기"
+                    onclick="handleSignIn('google')"
+                >
+                    Google로 로그인하기
+                </button>
+            </div>
+
         </section>
 
         <!-- Phase 2: 문서 바치기 -->
@@ -48,24 +56,40 @@
             </div>
 
             <div class="dialogue-container">
-                <div class="nes-container is-rounded is-dark dialogue-box">
+                <div class="nes-container is-rounded dialogue-box upload-dialogue">
                     <p id="typewriter-2" class="typewriter-text"></p>
                     <div id="action-2" class="input-area hidden">
-                        <div style="display: flex; align-items: center; gap: 15px; width: 100%;">
-                            <!-- PDF 업로드 영역 (좌측 85~90%) -->
-                            <div style="display: flex; align-items: center; gap: 10px; flex: 9;">
-                                <input type="file" id="pdf-input" accept=".pdf" style="color: white; flex: 1;">
-                                <button type="button" class="nes-btn is-success" onclick="handleUpload()">바치기</button>
-                            </div>
-                            
-                            <!-- 구분선 (세로) -->
-                            <div style="width: 2px; height: 30px; background-color: #555;"></div>
+                        <div class="upload-options">
 
-                            <!-- 직무 검색 영역 (우측 약 10~15%) -->
-                            <div style="display: flex; align-items: center; gap: 5px; flex: 2;">
-                                <input type="text" id="phase2-search-input" class="nes-input is-dark" placeholder="직무 검색" style="flex: 1; min-width: 80px;">
-                                <button type="button" class="nes-btn is-primary" onclick="handlePhase2Search()" style="padding: 6px 12px;">🔍</button>
+                            <!-- 왼쪽: PDF 업로드 -->
+                            <div class="upload-option-card">
+                                <div class="option-title">📜 결과지로 직무 추천받기</div>
+                                <div class="option-desc">
+                                    이미 결과지가 있는 분 · 나에게 맞는 직무를 추천받고 싶은 분
+                                </div>
+                                <a href="https://www.work24.go.kr/cm/c/f/ggc/selectGgcLst.do" target="_blank" class="option-link">
+                                    📋 결과지 없다면? → 고용24에서 검사하기
+                                </a>
+                                <div class="option-input">
+                                    <input type="file" id="pdf-input" accept=".pdf" style="flex: 1; color: #212529;">
+                                    <button type="button" class="nes-btn is-success" onclick="handleUpload()">바치기</button>
+                                </div>
                             </div>
+
+                            <div class="option-divider">또는</div>
+
+                            <!-- 오른쪽: 직무 검색 -->
+                            <div class="upload-option-card">
+                                <div class="option-title">🔍 직무 직접 검색하기</div>
+                                <div class="option-desc">
+                                    관심 있는 직무가 있는 분 · 빠르게 직무 정보만 얻고 싶은 분
+                                </div>
+                                <div class="option-input" style="margin-top: 28px;">
+                                    <input type="text" id="phase2-search-input" class="nes-input" placeholder="직무명 입력" style="flex: 1; min-width: 80px;">
+                                    <button type="button" class="nes-btn is-primary" onclick="handlePhase2Search()">🔍</button>
+                                </div>
+                            </div>
+
                         </div>
                     </div>
                 </div>
@@ -114,9 +138,9 @@
         <!-- Phase 7: 직무 상세 정보 -->
         <section id="phase-job-detail" class="phase">
             <div class="background results-bg"></div>
-            <div class="notice-board nes-container is-rounded with-title" style="background-color: #f8e5c0; width: 60%; left: 20%; height: auto; max-height: 550px; color: black; padding-top: 30px !important; top: 5% !important;">
+            <div class="notice-board nes-container is-rounded with-title" style="background-color: #f8e5c0; width: 65%; left: 17.5%; height: auto; max-height: 580px; color: black; padding-top: 30px !important; top: 3% !important;">
                 <p class="title" id="detail-title">📜 직무 상세 정보</p>
-                <div id="detail-content" style="padding: 20px; overflow-y: auto; max-height: 380px; line-height: 1.6; color: #333;">
+                <div id="detail-content" style="padding: 16px 20px; overflow-y: auto; max-height: 440px; line-height: 1.6; color: #333;">
                     <!-- JS에서 내용 추가됨 -->
                 </div>
                 <div style="text-align: center; margin-bottom: 20px;">

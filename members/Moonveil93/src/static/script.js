@@ -4,19 +4,27 @@ let currentSession = null;
 let lastScores = null; // 최근 추출된 RIASEC 점수 저장
 
 async function initSupabase() {
-    const url = "https://fbpkizfwmvaevktdqwqj.supabase.co";
-    const key = "sb_publishable_PPuYu0NRP2VRtqCgZ_zO2w_HV-OnnPC";
-    
-    supabaseClient = supabase.createClient(url, key);
+    try {
+        const response = await fetch('/api/supabase_config');
+        const config = await response.json();
+        
+        if (config.status === 'success') {
+            supabaseClient = supabase.createClient(config.url, config.publishable_key);
 
-    supabaseClient.auth.onAuthStateChange((event, session) => {
-        currentSession = session;
-        updateAuthUI(session);
-    });
+            supabaseClient.auth.onAuthStateChange((event, session) => {
+                currentSession = session;
+                updateAuthUI(session);
+            });
 
-    const { data: { session } } = await supabaseClient.auth.getSession();
-    currentSession = session;
-    updateAuthUI(session);
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            currentSession = session;
+            updateAuthUI(session);
+        } else {
+            console.error("Supabase 설정 로드 실패:", config.message);
+        }
+    } catch (error) {
+        console.error("Supabase 초기화 중 오류 발생:", error);
+    }
 }
 
 function updateAuthUI(session) {
@@ -136,7 +144,7 @@ function viewSavedRoadmap(item) {
 document.addEventListener('DOMContentLoaded', initSupabase);
 
 const dialogues = {
-    2: "어서오거라! 관아에서 받아온 네놈의 자질 문서(PDF)를 보여다오!\n(고용24 직업선호도검사 L형 설문을 완료 후 PDF 결과지를 다운 받아 첨부해주세요.)",
+    2: "어서오거라! 아래 두 가지 길 중 하나를 선택하시게나.",
     3: "오호, 너의 기질을 해독해 보았느니라.\n한번 확인해 보겠느냐?",
     4: "방보를 확인하시게. 자네에게 제일 잘 맞을 것 같은 10가지의 일거리 라네.\n어떤일을 하기를 원하는가? 하나 선택해 보게나.",
     5: "호오, 그 일을 해보려는가? \n그렇다면 관련된 학문(전공)은 접해본 적이 있는가?",
@@ -247,11 +255,84 @@ function goToRecommendations() {
 function showJobDetail(job, fromPhase) {
     selectedJob = job;
     document.getElementById('detail-title').innerText = `📜 ${job.JK중분류} 상세 정보`;
-    const infoText = job.직무정보 ? job.직무정보.replace(/\n/g, '<br>') : "상세 정보가 없사옵니다.";
-    document.getElementById('detail-content').innerHTML = infoText;
+    document.getElementById('detail-content').innerHTML = formatJobInfo(job.직무정보);
     const backBtn = document.getElementById('back-to-list-btn');
     backBtn.onclick = () => nextPhase(fromPhase);
     nextPhase(7);
+}
+
+function formatJobInfo(rawText) {
+    if (!rawText) return '<p class="jd-empty">상세 정보가 없사옵니다.</p>';
+
+    const sectionConfig = [
+        { icon: '📌', cls: 'jd-define' },
+        { icon: '🎯', cls: 'jd-role'   },
+        { icon: '💼', cls: 'jd-tasks'  },
+        { icon: '🔧', cls: 'jd-skills' },
+    ];
+
+    const lines = rawText.split('\n');
+    const sections = [];
+    let current = null;
+
+    for (const line of lines) {
+        const m = line.match(/^(\d+)\.\s+(.+)/);
+        if (m) {
+            if (current) sections.push(current);
+            const full = m[2];
+            const colonIdx = full.indexOf(':');
+            const title = colonIdx !== -1 ? full.slice(0, colonIdx).trim() : full.trim();
+            const rest  = colonIdx !== -1 ? full.slice(colonIdx + 1).trim() : '';
+            current = { title, lines: rest ? [rest] : [] };
+        } else if (current) {
+            current.lines.push(line);
+        }
+    }
+    if (current) sections.push(current);
+
+    if (sections.length === 0) return `<p class="jd-para">${rawText.replace(/\n/g, '<br>')}</p>`;
+
+    return sections.map((sec, i) => {
+        const cfg = sectionConfig[i] || sectionConfig[0];
+        return `<div class="jd-section ${cfg.cls}">
+            <div class="jd-section-title">${cfg.icon} ${sec.title}</div>
+            <div class="jd-section-body">${buildDetailHtml(sec.lines.join('\n'))}</div>
+        </div>`;
+    }).join('');
+}
+
+function buildDetailHtml(text) {
+    const lines = text.split('\n');
+    let html = '';
+    const openLists = [];
+
+    const closeListsTo = (depth) => {
+        while (openLists.length > 0 && openLists[openLists.length - 1] > depth) {
+            html += '</ul>';
+            openLists.pop();
+        }
+    };
+
+    for (const line of lines) {
+        if (!line.trim()) continue;
+        const indent = (line.match(/^( *)/) || ['', ''])[1].length;
+        const trimmed = line.trim();
+        if (trimmed.startsWith('- ')) {
+            const content = trimmed.slice(2);
+            const depth = Math.floor(indent / 2);
+            closeListsTo(depth);
+            if (openLists.length === 0 || openLists[openLists.length - 1] < depth) {
+                html += `<ul class="${openLists.length === 0 ? 'jd-list' : 'jd-sublist'}">`;
+                openLists.push(depth);
+            }
+            html += `<li>${content}</li>`;
+        } else {
+            closeListsTo(-1);
+            html += `<p class="jd-para">${trimmed}</p>`;
+        }
+    }
+    closeListsTo(-1);
+    return html;
 }
 
 function renderJobList(jobs) {

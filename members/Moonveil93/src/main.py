@@ -3,30 +3,172 @@ import numpy as np
 import re
 import io
 import os
+import json
+import urllib.error
+import urllib.parse
+import urllib.request
+from uuid import UUID
+from typing import Optional
 from dotenv import load_dotenv
 from pypdf import PdfReader
-from openai import OpenAI
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Header
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 # .env 파일 로드
-load_dotenv()
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(BASE_DIR, ".env"))
+OPENAI_API_KEY = (os.getenv("OPENAI_API_KEY") or "").strip()
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = (
+    os.getenv("SUPABASE_PUBLISHABLE_KEY")
+    or os.getenv("SUPABASE_ANON_KEY")
+    or os.getenv("SUPABASE_KEY")
+)
+
+JK_JOB_SELECT = (
+    "id,JK_L_category,JK_M_category,top3,"
+    "realistic_score,investigative_score,artistic_score,social_score,"
+    "enterprising_score,conventional_score,major_required,job_information"
+)
+USER_ROADMAP_SELECT = "id,job_name,riasec_scores,roadmap_text,created_at"
+OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
 
 app = FastAPI()
 
-# 프론트엔드 정적 파일(HTML, CSS, JS) 서빙 설정
-# (프로젝트 폴더 안에 'static' 폴더를 만들고 index.html, style.css, script.js를 넣으세요)
-app.mount("/static", StaticFiles(directory="static"), name="static")
+def supabase_request(path, method="GET", params=None, body=None, token=None, prefer=None):
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise RuntimeError("Supabase 환경 변수가 설정되지 않았습니다.")
 
-# 전역 데이터 로드
-try:
-    df = pd.read_csv("잡코리아_Onet통합본_직무정보추가.csv")
-except Exception as e:
-    print(f"데이터 로드 실패: {e}")
-    df = pd.DataFrame()
+    base_url = SUPABASE_URL.rstrip("/")
+    query = ""
+    if params:
+        query = "?" + urllib.parse.urlencode(params, safe=",().:*")
+
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Accept": "application/json",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    if body is not None:
+        headers["Content-Type"] = "application/json"
+    if prefer:
+        headers["Prefer"] = prefer
+
+    data = None if body is None else json.dumps(body, ensure_ascii=False).encode("utf-8")
+    request = urllib.request.Request(
+        f"{base_url}{path}{query}",
+        data=data,
+        headers=headers,
+        method=method,
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            raw = response.read().decode("utf-8")
+            return json.loads(raw) if raw else None
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Supabase 요청 실패 ({e.code}): {detail}") from e
+
+
+def openai_chat_completion(messages, temperature=0.7, model="gpt-4o-mini"):
+    if not OPENAI_API_KEY:
+        raise RuntimeError("OPENAI_API_KEY 환경 변수가 설정되지 않았습니다.")
+
+    payload = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+    }
+    request = urllib.request.Request(
+        OPENAI_CHAT_COMPLETIONS_URL,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {OPENAI_API_KEY}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="replace")
+        try:
+            parsed = json.loads(detail)
+            detail = parsed.get("error", {}).get("message", detail)
+        except json.JSONDecodeError:
+            pass
+        raise RuntimeError(f"OpenAI 요청 실패 ({e.code}): {detail}") from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"OpenAI 연결 실패: {e.reason}") from e
+
+    try:
+        return result["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as e:
+        raise RuntimeError("OpenAI 응답 형식이 예상과 다릅니다.") from e
+
+
+def get_bearer_token(authorization: Optional[str]):
+    if not authorization:
+        return None
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise ValueError("Authorization 헤더 형식이 올바르지 않습니다.")
+    return token.strip()
+
+
+def get_authenticated_user(token):
+    user = supabase_request("/auth/v1/user", token=token)
+    if not user or not user.get("id"):
+        raise RuntimeError("인증된 사용자 정보를 확인할 수 없습니다.")
+    return user
+
+
+def map_jk_job_row(row):
+    return {
+        "id": row.get("id"),
+        "JK대분류": row.get("JK_L_category") or "",
+        "JK중분류": row.get("JK_M_category") or "",
+        "Top3": row.get("top3") or "",
+        "현실형(R) T": row.get("realistic_score"),
+        "탐구형(I) T": row.get("investigative_score"),
+        "예술형(A) T": row.get("artistic_score"),
+        "사회형(S) T": row.get("social_score"),
+        "진취형(E) T": row.get("enterprising_score"),
+        "관습형(C) T": row.get("conventional_score"),
+        "전공필수": row.get("major_required") or "",
+        "직무정보": row.get("job_information") or "",
+    }
+
+
+def load_job_dataframe():
+    rows = supabase_request(
+        "/rest/v1/JK_job",
+        params={"select": JK_JOB_SELECT, "order": "id.asc"},
+    )
+    return pd.DataFrame([map_jk_job_row(row) for row in rows or []])
+
+
+def save_user_roadmap(token, user_id, job_name, riasec_scores, roadmap_text):
+    payload = {
+        "user_id": user_id,
+        "job_name": job_name,
+        "riasec_scores": riasec_scores,
+        "roadmap_text": roadmap_text,
+    }
+    return supabase_request(
+        "/rest/v1/user_roadmaps",
+        method="POST",
+        body=payload,
+        token=token,
+        prefer="return=representation",
+    )
 
 # --- 핵심 로직 함수들 (기존 코드 재사용) ---
 def extract_scores_from_pdf(pdf_bytes):
@@ -108,12 +250,26 @@ class RoadmapRequest(BaseModel):
     job_name: str
     is_major_required: bool
     user_major_status: str
+    riasec_scores: Optional[dict] = None
 
 @app.get("/", response_class=HTMLResponse)
 async def read_index():
     # static 폴더 내의 index.html 반환
-    with open("static/index.html", "r", encoding="utf-8") as f:
+    with open(os.path.join(BASE_DIR, "static", "index.html"), "r", encoding="utf-8") as f:
         return f.read()
+
+@app.get("/api/supabase_config")
+async def supabase_config():
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return JSONResponse(
+            content={"status": "error", "message": "Supabase 설정이 없습니다."},
+            status_code=500,
+        )
+    return {
+        "status": "success",
+        "url": SUPABASE_URL,
+        "publishable_key": SUPABASE_KEY,
+    }
 
 @app.post("/api/upload_pdf")
 async def upload_pdf(file: UploadFile = File(...)):
@@ -121,7 +277,8 @@ async def upload_pdf(file: UploadFile = File(...)):
     try:
         pdf_bytes = await file.read()
         scores = extract_scores_from_pdf(pdf_bytes)
-        recommendations = recommend_jobs_for_user_profile(scores, df)
+        jobs_df = load_job_dataframe()
+        recommendations = recommend_jobs_for_user_profile(scores, jobs_df)
         
         return JSONResponse(content={
             "status": "success",
@@ -134,22 +291,76 @@ async def upload_pdf(file: UploadFile = File(...)):
 @app.get("/api/search_job")
 async def search_job(query: str):
     """직무명을 검색하여 결과를 반환하는 API"""
-    if df.empty:
+    jobs_df = load_job_dataframe()
+    if jobs_df.empty:
         return JSONResponse(content={"status": "error", "message": "데이터베이스를 불러올 수 없습니다."}, status_code=500)
     
-    results =df[
-        df['JK중분류'].str.contains(query, na=False, case=False)].head(5)
+    name_match = jobs_df["JK중분류"].str.contains(query, na=False, case=False, regex=False)
+    results = jobs_df[name_match].head(5)
     
     
     # NaN 처리를 위해 replace 사용
     results_dict = results.fillna("").to_dict(orient="records")
     return JSONResponse(content={"status": "success", "results": results_dict})
 
+@app.get("/api/my_roadmaps")
+async def my_roadmaps(authorization: Optional[str] = Header(default=None)):
+    try:
+        token = get_bearer_token(authorization)
+        if not token:
+            return JSONResponse(content={"status": "error", "message": "로그인이 필요합니다."}, status_code=401)
+
+        user = get_authenticated_user(token)
+        data = supabase_request(
+            "/rest/v1/user_roadmaps",
+            params={
+                "select": USER_ROADMAP_SELECT,
+                "user_id": f"eq.{user['id']}",
+                "order": "created_at.desc",
+            },
+            token=token,
+        )
+        return {"status": "success", "data": data or []}
+    except ValueError as e:
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=401)
+    except Exception as e:
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
+
+@app.delete("/api/delete_roadmap/{roadmap_id}")
+async def delete_roadmap(roadmap_id: str, authorization: Optional[str] = Header(default=None)):
+    try:
+        token = get_bearer_token(authorization)
+        if not token:
+            return JSONResponse(content={"status": "error", "message": "로그인이 필요합니다."}, status_code=401)
+
+        roadmap_uuid = str(UUID(roadmap_id))
+        user = get_authenticated_user(token)
+        deleted = supabase_request(
+            "/rest/v1/user_roadmaps",
+            method="DELETE",
+            params={
+                "id": f"eq.{roadmap_uuid}",
+                "user_id": f"eq.{user['id']}",
+            },
+            token=token,
+            prefer="return=representation",
+        )
+        if not deleted:
+            return JSONResponse(content={"status": "error", "message": "삭제할 기록을 찾을 수 없습니다."}, status_code=404)
+        return {"status": "success"}
+    except ValueError:
+        return JSONResponse(content={"status": "error", "message": "로드맵 ID가 올바르지 않습니다."}, status_code=400)
+    except Exception as e:
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
+
 @app.post("/api/roadmap")
-async def generate_roadmap(req: RoadmapRequest):
+async def generate_roadmap(req: RoadmapRequest, authorization: Optional[str] = Header(default=None)):
     """선택한 직무와 전공 여부를 바탕으로 AI 로드맵을 생성하는 API"""
-    client = OpenAI(api_key=OPENAI_API_KEY)
     is_user_major = (req.user_major_status == "yes")
+    try:
+        token = get_bearer_token(authorization)
+    except ValueError as e:
+        token = None
     
     # (이하 사용자님이 작성하신 프롬프트 분기 로직과 동일하게 유지)
     if req.is_major_required:
@@ -316,18 +527,23 @@ async def generate_roadmap(req: RoadmapRequest):
     full_prompt = f"[System Role]\n{sys_role}\n\n[User Context]\n{user_context}\n\n[Output Instructions]\n{out_inst}"
     
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
+        roadmap_text = openai_chat_completion(
             messages=[
                 {"role": "system", "content": full_prompt},
                 {"role": "user", "content": "나를 위한 직무 전환 및 취업 로드맵을 작성해줘."}
             ],
             temperature=0.7
         )
-        return {"status": "success", "roadmap": response.choices[0].message.content}
+        if token:
+            user = get_authenticated_user(token)
+            save_user_roadmap(token, user["id"], req.job_name, req.riasec_scores, roadmap_text)
+        return {"status": "success", "roadmap": roadmap_text}
     except Exception as e:
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
 
+# 모든 API 정의 후에 정적 파일 서빙 설정
+app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
