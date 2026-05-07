@@ -32,7 +32,7 @@ JK_JOB_SELECT = (
     "realistic_score,investigative_score,artistic_score,social_score,"
     "enterprising_score,conventional_score,major_required,job_information"
 )
-USER_ROADMAP_SELECT = "id,job_name,riasec_scores,roadmap_text,created_at"
+USER_ROADMAP_SELECT = "id,job_name,riasec_scores,roadmap_text,job_information,created_at"
 OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
 
 app = FastAPI()
@@ -155,12 +155,13 @@ def load_job_dataframe():
     return pd.DataFrame([map_jk_job_row(row) for row in rows or []])
 
 
-def save_user_roadmap(token, user_id, job_name, riasec_scores, roadmap_text):
+def save_user_roadmap(token, user_id, job_name, riasec_scores, roadmap_text, job_information=None):
     payload = {
         "user_id": user_id,
         "job_name": job_name,
         "riasec_scores": riasec_scores,
         "roadmap_text": roadmap_text,
+        "job_information": job_information,
     }
     return supabase_request(
         "/rest/v1/user_roadmaps",
@@ -251,6 +252,7 @@ class RoadmapRequest(BaseModel):
     is_major_required: bool
     user_major_status: str
     riasec_scores: Optional[dict] = None
+    job_information: Optional[str] = None
 
 @app.get("/", response_class=HTMLResponse)
 async def read_index():
@@ -536,7 +538,7 @@ async def generate_roadmap(req: RoadmapRequest, authorization: Optional[str] = H
         )
         if token:
             user = get_authenticated_user(token)
-            save_user_roadmap(token, user["id"], req.job_name, req.riasec_scores, roadmap_text)
+            save_user_roadmap(token, user["id"], req.job_name, req.riasec_scores, roadmap_text, req.job_information)
         return {"status": "success", "roadmap": roadmap_text}
     except Exception as e:
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
