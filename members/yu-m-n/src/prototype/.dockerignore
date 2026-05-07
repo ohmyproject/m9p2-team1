@@ -1,0 +1,12 @@
+.env
+.env.*
+.vercel
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.git/
+.gitignore
+*.pdf
+.cloudrun-env.generated.yaml

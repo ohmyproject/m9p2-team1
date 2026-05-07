@@ -1,0 +1,21 @@
+# Web framework
+fastapi
+uvicorn[standard]
+python-multipart
+
+# Data
+pandas
+numpy
+
+# PDF parsing (core.py uses PyMuPDF/fitz)
+PyMuPDF
+
+# Database
+pymysql
+sqlalchemy
+
+# AI
+openai
+
+# Env
+python-dotenv

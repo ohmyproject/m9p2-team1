@@ -1,0 +1,6 @@
+.vercel
+.env
+.env*.local
+.cloudrun-env.generated.yaml
+__pycache__/
+*.pyc
