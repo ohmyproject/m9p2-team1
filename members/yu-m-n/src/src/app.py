@@ -4,119 +4,19 @@ import numpy as np
 import re
 import io
 import os
-import json
-import urllib.error
-import urllib.parse
-import urllib.request
 from dotenv import load_dotenv
 from pypdf import PdfReader
+from openai import OpenAI
 
 # .env 파일 로드
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-load_dotenv(os.path.join(BASE_DIR, ".env"))
-OPENAI_API_KEY = (os.getenv("OPENAI_API_KEY") or "").strip()
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = (
-    os.getenv("SUPABASE_PUBLISHABLE_KEY")
-    or os.getenv("SUPABASE_ANON_KEY")
-    or os.getenv("SUPABASE_KEY")
-)
-JK_JOB_SELECT = (
-    "id,JK_L_category,JK_M_category,top3,"
-    "realistic_score,investigative_score,artistic_score,social_score,"
-    "enterprising_score,conventional_score,major_required,job_information"
-)
-OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
+load_dotenv()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 st.set_page_config(page_title="노비 JOB 아라", page_icon="", layout="centered")
 
-def supabase_request(path, params=None):
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        raise RuntimeError("Supabase 환경 변수가 설정되지 않았습니다.")
-
-    query = ""
-    if params:
-        query = "?" + urllib.parse.urlencode(params, safe=",().:*")
-
-    request = urllib.request.Request(
-        f"{SUPABASE_URL.rstrip('/')}{path}{query}",
-        headers={"apikey": SUPABASE_KEY, "Accept": "application/json"},
-        method="GET",
-    )
-
-    try:
-        with urllib.request.urlopen(request, timeout=20) as response:
-            raw = response.read().decode("utf-8")
-            return json.loads(raw) if raw else None
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Supabase 요청 실패 ({e.code}): {detail}") from e
-
-
-def openai_chat_completion(messages, temperature=0.7, model="gpt-4o-mini"):
-    if not OPENAI_API_KEY:
-        raise RuntimeError("OPENAI_API_KEY 환경 변수가 설정되지 않았습니다.")
-
-    payload = {
-        "model": model,
-        "messages": messages,
-        "temperature": temperature,
-    }
-    request = urllib.request.Request(
-        OPENAI_CHAT_COMPLETIONS_URL,
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {OPENAI_API_KEY}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        },
-        method="POST",
-    )
-
-    try:
-        with urllib.request.urlopen(request, timeout=120) as response:
-            result = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", errors="replace")
-        try:
-            parsed = json.loads(detail)
-            detail = parsed.get("error", {}).get("message", detail)
-        except json.JSONDecodeError:
-            pass
-        raise RuntimeError(f"OpenAI 요청 실패 ({e.code}): {detail}") from e
-    except urllib.error.URLError as e:
-        raise RuntimeError(f"OpenAI 연결 실패: {e.reason}") from e
-
-    try:
-        return result["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as e:
-        raise RuntimeError("OpenAI 응답 형식이 예상과 다릅니다.") from e
-
-
-def map_jk_job_row(row):
-    return {
-        "id": row.get("id"),
-        "JK대분류": row.get("JK_L_category") or "",
-        "JK중분류": row.get("JK_M_category") or "",
-        "Top3": row.get("top3") or "",
-        "현실형(R) T": row.get("realistic_score"),
-        "탐구형(I) T": row.get("investigative_score"),
-        "예술형(A) T": row.get("artistic_score"),
-        "사회형(S) T": row.get("social_score"),
-        "진취형(E) T": row.get("enterprising_score"),
-        "관습형(C) T": row.get("conventional_score"),
-        "전공필수": row.get("major_required") or "",
-        "직무정보": row.get("job_information") or "",
-    }
-
-
 @st.cache_data
 def load_data():
-    rows = supabase_request(
-        "/rest/v1/JK_job",
-        params={"select": JK_JOB_SELECT, "order": "id.asc"},
-    )
-    return pd.DataFrame([map_jk_job_row(row) for row in rows or []])
+    return pd.read_csv("잡코리아_Onet통합본_직무정보추가.csv")
 
 def extract_scores_from_pdf(pdf_bytes):
     reader = PdfReader(io.BytesIO(pdf_bytes))
@@ -192,6 +92,8 @@ def run_ai_roadmap(job_row, user_major_status):
     is_major_required = (job_row['전공필수'] == 'O')
     is_user_major = (user_major_status == "관련 전공")
     
+    client = OpenAI(api_key=OPENAI_API_KEY)
+    
     if is_major_required:
         if not is_user_major:
             # 🤖 [학위 필수 비전공자용] 로드맵 프롬프트
@@ -264,16 +166,15 @@ def run_ai_roadmap(job_row, user_major_status):
     
     with st.spinner(f"AI가 '{job_name}' 맞춤형 로드맵을 생성하고 있습니다..."):
         try:
-            roadmap_text = openai_chat_completion(
-                messages=[
-                    {"role": "system", "content": full_prompt},
-                    {"role": "user", "content": "나를 위한 직무 전환 및 취업 로드맵을 작성해줘."}
-                ],
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "system", "content": full_prompt},
+                          {"role": "user", "content": "나를 위한 직무 전환 및 취업 로드맵을 작성해줘."}],
                 temperature=0.7
             )
             st.markdown("---")
             st.markdown(f"## 🗺️ {job_name} 맞춤형 커리어 로드맵")
-            st.markdown(roadmap_text)
+            st.markdown(response.choices[0].message.content)
             # 생성 후 자동 생성 플래그 해제
             st.session_state.auto_generate = False
         except Exception as e:
@@ -375,7 +276,8 @@ def main():
         
         if search_query:
             search_results = df[
-                df['JK중분류'].str.contains(search_query, na=False, case=False)
+                df['JK중분류'].str.contains(search_query, na=False, case=False) |
+                df['매핑 O*NET 직업명'].str.contains(search_query, na=False, case=False)
             ].head(5)
             
             if not search_results.empty:

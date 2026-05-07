@@ -37,6 +37,10 @@ OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
 
 app = FastAPI()
 
+# 프론트엔드 정적 파일(HTML, CSS, JS) 서빙 설정
+# (프로젝트 폴더 안에 'static' 폴더를 만들고 index.html, style.css, script.js를 넣으세요)
+app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
+
 def supabase_request(path, method="GET", params=None, body=None, token=None, prefer=None):
     if not SUPABASE_URL or not SUPABASE_KEY:
         raise RuntimeError("Supabase 환경 변수가 설정되지 않았습니다.")
@@ -360,7 +364,7 @@ async def generate_roadmap(req: RoadmapRequest, authorization: Optional[str] = H
     try:
         token = get_bearer_token(authorization)
     except ValueError as e:
-        token = None
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=401)
     
     # (이하 사용자님이 작성하신 프롬프트 분기 로직과 동일하게 유지)
     if req.is_major_required:
@@ -540,9 +544,6 @@ async def generate_roadmap(req: RoadmapRequest, authorization: Optional[str] = H
         return {"status": "success", "roadmap": roadmap_text}
     except Exception as e:
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
-
-# 모든 API 정의 후에 정적 파일 서빙 설정
-app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
 if __name__ == "__main__":
     import uvicorn
