@@ -8,6 +8,8 @@
     <link href="https://unpkg.com/nes.css@latest/css/nes.min.css" rel="stylesheet" />
     <!-- ⚠️ 중요: /static/ 경로 명시 -->
     <link rel="stylesheet" href="/static/style.css">
+    <!-- Supabase JS SDK -->
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
 </head>
 <body>
     <div id="game-container">
@@ -16,6 +18,26 @@
             <div class="background intro-bg"></div>
             <h1 class="game-title"></h1>
             <button type="button" class="start-btn" onclick="nextPhase(2)"></button>
+            
+            <!-- 로그인 후: 우측 상단 배지 -->
+            <div id="user-info" class="hidden auth-badge-top">
+                🔖 <span id="user-name"></span>님 환영합니다
+                <button type="button" class="auth-small-btn" onclick="showHistory()">나의 기록</button>
+                <button type="button" class="auth-small-btn auth-small-btn--danger" onclick="handleSignOut()">로그아웃</button>
+            </div>
+
+            <!-- 로그인 전: 추천 시작 버튼 위에 같은 스타일 -->
+            <div id="login-buttons">
+                <button
+                    type="button"
+                    class="login-btn"
+                    aria-label="Google로 로그인하기"
+                    onclick="handleSignIn('google')"
+                >
+                    Google로 로그인하기
+                </button>
+            </div>
+
         </section>
 
         <!-- Phase 2: 문서 바치기 -->
@@ -34,7 +56,7 @@
             </div>
 
             <div class="dialogue-container">
-                <div class="nes-container is-rounded is-dark dialogue-box">
+                <div class="nes-container is-rounded dialogue-box upload-dialogue">
                     <p id="typewriter-2" class="typewriter-text"></p>
                     <div id="action-2" class="input-area hidden">
                         <div class="upload-options">
@@ -43,30 +65,27 @@
                             <div class="upload-option-card">
                                 <div class="option-title">📜 결과지로 직무 추천받기</div>
                                 <div class="option-desc">
-                                    이미 결과지가 있는 분<br>
-                                    나에게 맞는 직무를 추천받고 싶은 분
+                                    이미 결과지가 있는 분 · 나에게 맞는 직무를 추천받고 싶은 분
                                 </div>
                                 <a href="https://www.work24.go.kr/cm/c/f/ggc/selectGgcLst.do" target="_blank" class="option-link">
-                                    📋 결과지가 없다면? → 고용24에서 검사하기
+                                    📋 결과지 없다면? → 고용24에서 검사하기
                                 </a>
                                 <div class="option-input">
-                                    <input type="file" id="pdf-input" accept=".pdf" style="color: white; flex: 1;">
+                                    <input type="file" id="pdf-input" accept=".pdf" style="flex: 1; color: #212529;">
                                     <button type="button" class="nes-btn is-success" onclick="handleUpload()">바치기</button>
                                 </div>
                             </div>
 
-                            <!-- 구분선 -->
                             <div class="option-divider">또는</div>
 
                             <!-- 오른쪽: 직무 검색 -->
                             <div class="upload-option-card">
                                 <div class="option-title">🔍 직무 직접 검색하기</div>
                                 <div class="option-desc">
-                                    관심 있는 직무가 이미 있는 분<br>
-                                    빠르게 직무 정보만 얻고 싶은 분
+                                    관심 있는 직무가 있는 분 · 빠르게 직무 정보만 얻고 싶은 분
                                 </div>
                                 <div class="option-input" style="margin-top: 28px;">
-                                    <input type="text" id="phase2-search-input" class="nes-input is-dark" placeholder="직무명 입력" style="flex: 1; min-width: 80px;">
+                                    <input type="text" id="phase2-search-input" class="nes-input" placeholder="직무명 입력" style="flex: 1; min-width: 80px;">
                                     <button type="button" class="nes-btn is-primary" onclick="handlePhase2Search()">🔍</button>
                                 </div>
                             </div>
@@ -170,6 +189,17 @@
                 </div>
             </div>
         </section>
+
+        <!-- 과거 기록 모달 팝업 -->
+        <div id="history-modal" class="nes-container is-rounded is-dark hidden" style="position: fixed; top: 10%; left: 15%; width: 70%; height: 80%; z-index: 2000; background: #212529; padding: 30px;">
+            <p class="title" style="font-size: 24px; color: #f7d51d;">📜 나의 과거 로드맵 기록</p>
+            <div id="history-list" style="max-height: 80%; overflow-y: auto; margin-top: 20px;">
+                <!-- 기록 리스트가 여기에 동적으로 추가됨 -->
+            </div>
+            <div style="text-align: right; margin-top: 20px;">
+                <button type="button" class="nes-btn is-error" onclick="document.getElementById('history-modal').classList.add('hidden')">닫기</button>
+            </div>
+        </div>
     </div>
 
     <!-- ⚠️ 중요: /static/ 경로 명시 -->
