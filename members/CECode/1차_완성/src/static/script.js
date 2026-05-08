@@ -217,6 +217,36 @@ async function handleUpload() {
     } catch (error) { alert("서버 연결 실패!"); }
 }
 
+async function handleLoadSavedScores() {
+    if (!currentSession) {
+        alert("먼저 로그인해 주시게! 저장된 점수를 불러오려면 계정 확인이 필요하옵니다.");
+        return;
+    }
+
+    document.getElementById('typewriter-2').innerText = "예전 기록에서 가장 최근 점수를 찾고 있사옵니다... 잠시만 기다려 주시옵소서.";
+    document.getElementById('action-2').classList.add('hidden');
+
+    try {
+        const response = await fetch('/api/latest_riasec_scores', {
+            headers: { 'Authorization': `Bearer ${currentSession.access_token}` }
+        });
+        const data = await response.json();
+
+        if (data.status === 'success') {
+            tempRecommendations = data.recommendations || [];
+            lastScores = data.scores;
+            renderScores(data.scores);
+            nextPhase(3);
+        } else {
+            alert("점수 불러오기 실패: " + data.message);
+            document.getElementById('action-2').classList.remove('hidden');
+        }
+    } catch (error) {
+        alert("서버 연결 실패!");
+        document.getElementById('action-2').classList.remove('hidden');
+    }
+}
+
 function renderScores(scores) {
     const RL = [
         { name: "현실형", k: "R" }, { name: "탐구형", k: "I" }, { name: "예술형", k: "A" },

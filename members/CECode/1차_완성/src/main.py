@@ -33,6 +33,7 @@ JK_JOB_SELECT = (
     "enterprising_score,conventional_score,major_required,job_information"
 )
 USER_ROADMAP_SELECT = "id,job_name,riasec_scores,roadmap_text,job_information,created_at"
+RIASEC_LABELS = ["현실형", "탐구형", "예술형", "사회형", "진취형", "관습형"]
 OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
 
 app = FastAPI()
@@ -171,6 +172,34 @@ def save_user_roadmap(token, user_id, job_name, riasec_scores, roadmap_text, job
         prefer="return=representation",
     )
 
+
+def normalize_riasec_scores(scores):
+    if isinstance(scores, str):
+        try:
+            scores = json.loads(scores)
+        except json.JSONDecodeError as e:
+            raise ValueError("저장된 RIASEC 점수 형식이 올바르지 않습니다.") from e
+
+    if not isinstance(scores, dict) or not scores:
+        raise ValueError("저장된 RIASEC 점수가 비어 있습니다.")
+
+    normalized = {}
+    for label in RIASEC_LABELS:
+        values = scores.get(label)
+        if not isinstance(values, dict):
+            raise ValueError("저장된 RIASEC 점수에 필요한 흥미 유형이 없습니다.")
+
+        try:
+            raw_score = int(values["원점수"])
+            standard_score = int(values["표준점수"])
+        except (KeyError, TypeError, ValueError) as e:
+            raise ValueError("저장된 RIASEC 점수 값이 올바르지 않습니다.") from e
+
+        normalized[label] = {"원점수": raw_score, "표준점수": standard_score}
+
+    return normalized
+
+
 # --- 핵심 로직 함수들 (기존 코드 재사용) ---
 def extract_scores_from_pdf(pdf_bytes):
     reader = PdfReader(io.BytesIO(pdf_bytes))
@@ -187,8 +216,7 @@ def extract_scores_from_pdf(pdf_bytes):
 
     raw_scores = list(map(int, m.group(1).split()))
     std_scores = list(map(int, m.group(2).split()))
-    labels = ["현실형", "탐구형", "예술형", "사회형", "진취형", "관습형"]
-    return {label: {"원점수": raw, "표준점수": std} for label, raw, std in zip(labels, raw_scores, std_scores)}
+    return {label: {"원점수": raw, "표준점수": std} for label, raw, std in zip(RIASEC_LABELS, raw_scores, std_scores)}
 
 def recommend_jobs_for_user_profile(user_scores, df_data):
     if df_data.empty:
@@ -289,6 +317,52 @@ async def upload_pdf(file: UploadFile = File(...)):
         })
     except Exception as e:
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=400)
+
+@app.get("/api/latest_riasec_scores")
+async def latest_riasec_scores(authorization: Optional[str] = Header(default=None)):
+    try:
+        try:
+            token = get_bearer_token(authorization)
+        except ValueError as e:
+            return JSONResponse(content={"status": "error", "message": str(e)}, status_code=401)
+
+        if not token:
+            return JSONResponse(content={"status": "error", "message": "로그인이 필요합니다."}, status_code=401)
+
+        user = get_authenticated_user(token)
+        data = supabase_request(
+            "/rest/v1/user_roadmaps",
+            params={
+                "select": "id,riasec_scores,created_at",
+                "user_id": f"eq.{user['id']}",
+                "riasec_scores": "not.is.null",
+                "order": "created_at.desc",
+                "limit": "1",
+            },
+            token=token,
+        )
+        if not data:
+            return JSONResponse(
+                content={"status": "error", "message": "불러올 수 있는 저장된 점수가 없습니다."},
+                status_code=404,
+            )
+
+        try:
+            scores = normalize_riasec_scores(data[0].get("riasec_scores"))
+        except ValueError as e:
+            return JSONResponse(content={"status": "error", "message": str(e)}, status_code=404)
+
+        jobs_df = load_job_dataframe()
+        recommendations = recommend_jobs_for_user_profile(scores, jobs_df)
+
+        return {
+            "status": "success",
+            "scores": scores,
+            "recommendations": recommendations,
+            "source_created_at": data[0].get("created_at"),
+        }
+    except Exception as e:
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
 
 @app.get("/api/search_job")
 async def search_job(query: str):

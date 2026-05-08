@@ -72,7 +72,10 @@
                                 </a>
                                 <div class="option-input">
                                     <input type="file" id="pdf-input" accept=".pdf" style="flex: 1; color: #212529;">
-                                    <button type="button" class="nes-btn is-success" onclick="handleUpload()">바치기</button>
+                                    <div class="upload-submit-stack">
+                                        <button type="button" class="nes-btn is-primary" onclick="handleLoadSavedScores()">점수 불러오기</button>
+                                        <button type="button" class="nes-btn is-success" onclick="handleUpload()">바치기</button>
+                                    </div>
                                 </div>
                             </div>
 
