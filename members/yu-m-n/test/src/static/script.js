@@ -232,7 +232,9 @@ async function deleteSavedRoadmap(roadmapId, btnElement) {
 function viewSavedRoadmap(item) {
     document.getElementById('history-modal').classList.add('hidden');
     selectedJob = { JK중분류: item.job_name, 직무정보: item.job_information || '' };
-    renderScores(item.riasec_scores || {});
+    // 챗봇이 흥미점수를 읽을 수 있도록 lastScores에도 저장
+    lastScores = item.riasec_scores || {};
+    renderScores(lastScores);
     renderRoadmapFromText(item.roadmap_text);
     nextPhase(6);
 }
@@ -598,20 +600,20 @@ function renderRoadmapFromText(rawText) {
     chatStage.className = "nes-container with-title roadmap-stage-card chatbot-stage-card";
     chatStage.innerHTML = `
         <p class="title">🔍 탐봇 — 직무 탐색 도우미</p>
-        <p class="roadmap-chat-intro">추천 직무가 나에게 진짜 맞는지 검증하고, 대안 직무 비교·교육 과정 탐색까지 도와드려요.<br>※ 흥미 기반 탐색이며 최종 진로 판정이 아닙니다.</p>
+        <p class="roadmap-chat-intro">추천 직무가 나에게 진짜 맞는지 검증하고, 대안 직무를 비교 탐색해드려요.<br>※ 흥미 기반 탐색이며 최종 진로 판정이 아닙니다.</p>
         <div class="roadmap-chat-suggestions">
             <button type="button" class="nes-btn is-small" onclick="useRoadmapChatPrompt('이 직무가 내 흥미 유형과 실제로 잘 맞아? 장단점도 알려줘')">✅ 직무 적합성 확인</button>
             <button type="button" class="nes-btn is-small" onclick="useRoadmapChatPrompt('이 직무와 비슷하면서 진입 장벽이 낮은 대안 직무를 추천해줘')">🔄 대안 직무 탐색</button>
-            <button type="button" class="nes-btn is-small" onclick="useRoadmapChatPrompt('이 직무 준비에 쓸 수 있는 국비지원 교육이나 부트캠프를 찾아줘')">📚 교육·강의 추천</button>
+
         </div>
         <div id="roadmap-chat-log" class="roadmap-chat-log"></div>
         <div class="roadmap-chat-input-row">
-            <input type="text" id="roadmap-chat-input" class="nes-input" placeholder="직무 적합성, 대안 직무, 교육 과정 등을 물어보세요..." onkeydown="handleRoadmapChatKey(event)">
+            <input type="text" id="roadmap-chat-input" class="nes-input" placeholder="직무 적합성, 대안 직무 등을 물어보세요..." onkeydown="handleRoadmapChatKey(event)">
             <button type="button" class="nes-btn is-primary" id="roadmap-chat-send" onclick="sendRoadmapChat()">질문</button>
         </div>
     `;
     container.appendChild(chatStage);
-    addRoadmapChatMessage("assistant", "안녕하세요! 직무 탐색 도우미 탐봇이에요 👋\n\n로드맵까지 받으셨군요! 이제 '이 직무가 진짜 나한테 맞나?'를 같이 검증해봐요.\n\n✅ 직무 적합성 검증\n🔄 비슷한 대안 직무 비교\n📚 국비지원·부트캠프·강의 추천\n\n위 버튼을 눌러보거나, 궁금한 걸 바로 물어보세요!");
+    addRoadmapChatMessage("assistant", "안녕하세요! 직무 탐색 도우미 탐봇이에요 👋\n\n로드맵까지 받으셨군요! 이제 '이 직무가 진짜 나한테 맞나?'를 같이 검증해봐요.\n\n✅ 직무 적합성 검증 — 내 흥미 유형과 이 직무가 맞는지 분석\n🔄 대안 직무 비교 — 비슷하거나 진입이 더 쉬운 직무 탐색\n\n위 버튼을 눌러보거나, 궁금한 걸 바로 물어보세요!");
     updateSlideButtons();
 }
 
