@@ -2,6 +2,8 @@
 let supabaseClient = null;
 let currentSession = null;
 let lastScores = null; // 최근 추출된 RIASEC 점수 저장
+let lastMajorAnswer = null;
+let roadmapChatMessages = [];
 
 async function initSupabase() {
     try {
@@ -77,32 +79,123 @@ async function showHistory() {
                 return;
             }
 
+            const toolbar = document.createElement('div');
+            toolbar.className = "history-bulk-toolbar";
+            toolbar.innerHTML = `
+                <label class="history-select-all">
+                    <input type="checkbox" id="history-select-all" onchange="toggleHistorySelection(this.checked)">
+                    <span>전체 선택</span>
+                </label>
+                <div class="history-bulk-actions">
+                    <span id="history-selected-count">0개 선택</span>
+                    <button type="button" class="nes-btn is-error" id="history-delete-selected" onclick="deleteSelectedRoadmaps()" disabled>선택 삭제</button>
+                </div>
+            `;
+            historyList.appendChild(toolbar);
+
             data.data.forEach(item => {
                 const date = new Date(item.created_at).toLocaleDateString();
+                const itemJson = JSON.stringify(item).replace(/'/g, "&apos;");
                 const div = document.createElement('div');
-                div.className = "nes-container is-rounded with-title";
-                div.style.marginBottom = "20px";
-                div.style.background = "#fff";
-                div.style.color = "#000";
+                div.className = "nes-container is-rounded with-title history-card";
+                div.dataset.roadmapId = item.id;
                 
                 div.innerHTML = `
                     <p class="title">${date} - ${item.job_name}</p>
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span>기록된 로드맵을 다시 확인하시겠소?</span>
-                        <div style="display: flex; gap: 10px;">
-                            <button type="button" class="nes-btn is-primary" onclick='viewSavedRoadmap(${JSON.stringify(item).replace(/'/g, "&apos;")})'>보기</button>
-                            <button type="button" class="nes-btn is-success" onclick='downloadHistoryImage(${JSON.stringify(item).replace(/'/g, "&apos;")})'>📸 이미지 저장</button>
+                    <div class="history-card-row">
+                        <div class="history-card-check">
+                            <input type="checkbox" class="history-select-checkbox" id="history-check-${item.id}" value="${item.id}" onchange="updateHistorySelectionState()">
+                            <label for="history-check-${item.id}"></label>
+                        </div>
+                        <span class="history-card-desc">기록된 로드맵을 다시 확인하시겠소?</span>
+                        <div class="history-card-actions">
+                            <button type="button" class="nes-btn is-primary" onclick='viewSavedRoadmap(${itemJson})'>보기</button>
+                            <button type="button" class="nes-btn is-success" onclick='downloadHistoryImage(${itemJson})'>📸 이미지 저장</button>
                             <button type="button" class="nes-btn is-error" onclick="deleteSavedRoadmap('${item.id}', this)">삭제</button>
                         </div>
                     </div>
                 `;
                 historyList.appendChild(div);
             });
+            updateHistorySelectionState();
         } else {
             historyList.innerHTML = "<p>오류: " + data.message + "</p>";
         }
     } catch (error) {
         historyList.innerHTML = "<p>서버 연결 실패!</p>";
+    }
+}
+
+function getSelectedHistoryIds() {
+    return Array.from(document.querySelectorAll('.history-select-checkbox:checked')).map(input => input.value);
+}
+
+function updateHistorySelectionState() {
+    const checkboxes = Array.from(document.querySelectorAll('.history-select-checkbox'));
+    const selectedIds = getSelectedHistoryIds();
+    const selectAll = document.getElementById('history-select-all');
+    const countLabel = document.getElementById('history-selected-count');
+    const deleteBtn = document.getElementById('history-delete-selected');
+
+    if (selectAll) {
+        selectAll.checked = checkboxes.length > 0 && selectedIds.length === checkboxes.length;
+        selectAll.indeterminate = selectedIds.length > 0 && selectedIds.length < checkboxes.length;
+    }
+    if (countLabel) countLabel.textContent = `${selectedIds.length}개 선택`;
+    if (deleteBtn) deleteBtn.disabled = selectedIds.length === 0;
+}
+
+function toggleHistorySelection(checked) {
+    document.querySelectorAll('.history-select-checkbox').forEach(input => {
+        input.checked = checked;
+    });
+    updateHistorySelectionState();
+}
+
+async function deleteSelectedRoadmaps() {
+    const selectedIds = getSelectedHistoryIds();
+    if (selectedIds.length === 0) {
+        alert("삭제할 기록을 선택해주세요.");
+        return;
+    }
+    if (!confirm(`선택한 ${selectedIds.length}개의 기록을 삭제하시겠소? 한 번 지우면 되돌릴 수 없느니라.`)) return;
+
+    const deleteBtn = document.getElementById('history-delete-selected');
+    if (deleteBtn) deleteBtn.disabled = true;
+
+    try {
+        const response = await fetch('/api/delete_roadmaps', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${currentSession.access_token}`
+            },
+            body: JSON.stringify({ ids: selectedIds })
+        });
+        const data = await response.json();
+
+        if (data.status === 'success') {
+            const deletedIds = Array.isArray(data.deleted_ids) ? data.deleted_ids : selectedIds;
+            deletedIds.forEach(id => {
+                document.querySelectorAll('.history-card').forEach(card => {
+                    if (card.dataset.roadmapId === id) card.remove();
+                });
+            });
+
+            const historyList = document.getElementById('history-list');
+            if (historyList && document.querySelectorAll('.history-card').length === 0) {
+                historyList.innerHTML = "<p>아직 저장된 로드맵이 없사옵니다.</p>";
+            } else {
+                updateHistorySelectionState();
+            }
+            alert(`${data.deleted_count || deletedIds.length}개의 기록이 삭제되었느니라.`);
+        } else {
+            alert("선택 삭제 실패: " + data.message);
+            updateHistorySelectionState();
+        }
+    } catch (error) {
+        alert("서버 연결 실패!");
+        updateHistorySelectionState();
     }
 }
 
@@ -119,12 +212,14 @@ async function deleteSavedRoadmap(roadmapId, btnElement) {
         if (data.status === 'success') {
             alert("기록이 삭제되었느니라.");
             // 리스트에서 해당 항목 제거
-            btnElement.closest('.nes-container').remove();
+            btnElement.closest('.history-card')?.remove();
             
             // 만약 리스트가 비었다면 메시지 표시
             const historyList = document.getElementById('history-list');
-            if (historyList.children.length === 0) {
+            if (document.querySelectorAll('.history-card').length === 0) {
                 historyList.innerHTML = "<p>아직 저장된 로드맵이 없사옵니다.</p>";
+            } else {
+                updateHistorySelectionState();
             }
         } else {
             alert("삭제 실패: " + data.message);
@@ -215,6 +310,36 @@ async function handleUpload() {
             document.getElementById('action-2').classList.remove('hidden');
         }
     } catch (error) { alert("서버 연결 실패!"); }
+}
+
+async function handleLoadSavedScores() {
+    if (!currentSession) {
+        alert("먼저 로그인해 주시게! 저장된 점수를 불러오려면 계정 확인이 필요하옵니다.");
+        return;
+    }
+
+    document.getElementById('typewriter-2').innerText = "예전 기록에서 가장 최근 점수를 찾고 있사옵니다... 잠시만 기다려 주시옵소서.";
+    document.getElementById('action-2').classList.add('hidden');
+
+    try {
+        const response = await fetch('/api/latest_riasec_scores', {
+            headers: { 'Authorization': `Bearer ${currentSession.access_token}` }
+        });
+        const data = await response.json();
+
+        if (data.status === 'success') {
+            tempRecommendations = data.recommendations || [];
+            lastScores = data.scores;
+            renderScores(data.scores);
+            nextPhase(3);
+        } else {
+            alert("점수 불러오기 실패: " + data.message);
+            document.getElementById('action-2').classList.remove('hidden');
+        }
+    } catch (error) {
+        alert("서버 연결 실패!");
+        document.getElementById('action-2').classList.remove('hidden');
+    }
 }
 
 function renderScores(scores) {
@@ -356,6 +481,7 @@ function renderJobList(jobs) {
 
 async function showRoadmap(answer) {
     if (!selectedJob) { alert("선택된 직무가 없사옵니다!"); return; }
+    lastMajorAnswer = answer;
 
     document.getElementById('typewriter-5').innerText = "AI 대감이 맞춤형 신분 상승의 길을 점치고 있사옵니다...\n잠시만 기다려 주시옵소서.";
     document.getElementById('action-5').classList.add('hidden');
@@ -400,16 +526,17 @@ function renderRoadmapFromText(rawText) {
     container.innerHTML = "";
     container.style.transform = "translateX(0)";
     currentSlide = 0;
+    roadmapChatMessages = [];
 
     const sections = rawText.split(/(?=(?:■|#|\*)*\s*\d+단계)/g).map(s => s.trim()).filter(s => s.length > 20);
     if (sections.length > 1 && !sections[0].includes("1단계") && sections[0].length < 100) {
          sections[1] = sections[0] + "\n\n" + sections[1];
          sections.shift();
     }
-    totalSlides = sections.length;
+    totalSlides = sections.length + 1;
     updateSlideButtons();
 
-    sections.forEach(section => {
+    sections.forEach((section, index) => {
         let titleText = "";
         let bodyContent = "";
         const stepMatch = section.match(/(\d+)단계[:\s]*(.*)/);
@@ -455,28 +582,36 @@ function renderRoadmapFromText(rawText) {
         const contentP = document.createElement('p');
         contentP.innerHTML = bodyContent;
         stageDiv.appendChild(titleP); stageDiv.appendChild(contentP);
+        if (index === sections.length - 1) {
+            const actionDiv = document.createElement('div');
+            actionDiv.className = "roadmap-final-actions";
+            actionDiv.innerHTML = `
+                <button type="button" class="nes-btn is-success" onclick="saveRoadmapImage()">🖼️ 이미지로 저장</button>
+                <button type="button" class="nes-btn is-warning" onclick="location.reload()">처음으로</button>
+            `;
+            stageDiv.appendChild(actionDiv);
+        }
         container.appendChild(stageDiv);
     });
 
-    totalSlides++; 
-    const searchStage = document.createElement('div');
-    searchStage.className = "nes-container with-title roadmap-stage-card";
-    searchStage.style.overflow = "hidden";
-    searchStage.innerHTML = `
-        <p class="title">🔍 다른 길 찾기</p>
-        <p>혹시 다른 직무의 로드맵이 궁금하신가?</p>
-        <div class="nes-field is-inline" style="margin-top: 20px;">
-            <input type="text" id="search-input" class="nes-input" placeholder="직무명을 입력하게...">
-            <button type="button" class="nes-btn" onclick="handleSearch()">검색</button>
+    const chatStage = document.createElement('div');
+    chatStage.className = "nes-container with-title roadmap-stage-card chatbot-stage-card";
+    chatStage.innerHTML = `
+        <p class="title">🔍 탐봇 — 직무 탐색 도우미</p>
+        <p class="roadmap-chat-intro">추천 직무가 나에게 진짜 맞는지 검증하고, 대안 직무 비교·교육 과정 탐색까지 도와드려요.<br>※ 흥미 기반 탐색이며 최종 진로 판정이 아닙니다.</p>
+        <div class="roadmap-chat-suggestions">
+            <button type="button" class="nes-btn is-small" onclick="useRoadmapChatPrompt('이 직무가 내 흥미 유형과 실제로 잘 맞아? 장단점도 알려줘')">✅ 직무 적합성 확인</button>
+            <button type="button" class="nes-btn is-small" onclick="useRoadmapChatPrompt('이 직무와 비슷하면서 진입 장벽이 낮은 대안 직무를 추천해줘')">🔄 대안 직무 탐색</button>
+            <button type="button" class="nes-btn is-small" onclick="useRoadmapChatPrompt('이 직무 준비에 쓸 수 있는 국비지원 교육이나 부트캠프를 찾아줘')">📚 교육·강의 추천</button>
         </div>
-        <div id="search-results" class="job-list-container" style="margin-top: 15px; max-height: 160px; overflow-y: auto; width: 95%; margin-left: auto; margin-right: auto;"></div>
-
-        <div style="text-align: center; margin-top: 20px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
-            <button type="button" class="nes-btn is-success" onclick="saveRoadmapImage()">🖼️ 이미지로 저장</button>
-            <button type="button" class="nes-btn is-warning" onclick="location.reload()">처음으로</button>
+        <div id="roadmap-chat-log" class="roadmap-chat-log"></div>
+        <div class="roadmap-chat-input-row">
+            <input type="text" id="roadmap-chat-input" class="nes-input" placeholder="직무 적합성, 대안 직무, 교육 과정 등을 물어보세요..." onkeydown="handleRoadmapChatKey(event)">
+            <button type="button" class="nes-btn is-primary" id="roadmap-chat-send" onclick="sendRoadmapChat()">질문</button>
         </div>
     `;
-    container.appendChild(searchStage);
+    container.appendChild(chatStage);
+    addRoadmapChatMessage("assistant", "안녕하세요! 직무 탐색 도우미 탐봇이에요 👋\n\n로드맵까지 받으셨군요! 이제 '이 직무가 진짜 나한테 맞나?'를 같이 검증해봐요.\n\n✅ 직무 적합성 검증\n🔄 비슷한 대안 직무 비교\n📚 국비지원·부트캠프·강의 추천\n\n위 버튼을 눌러보거나, 궁금한 걸 바로 물어보세요!");
     updateSlideButtons();
 }
 
@@ -497,6 +632,103 @@ function updateSlideButtons() {
     const nextBtn = document.querySelector('.slide-next');
     if (prevBtn) prevBtn.disabled = (currentSlide === 0);
     if (nextBtn) nextBtn.disabled = (currentSlide >= totalSlides - 1 || totalSlides === 0);
+}
+
+function escapeHtml(text) {
+    return String(text || '').replace(/[&<>"']/g, ch => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[ch]));
+}
+
+function addRoadmapChatMessage(role, text, citations = []) {
+    const log = document.getElementById('roadmap-chat-log');
+    if (!log) return;
+
+    const msg = document.createElement('div');
+    msg.className = `roadmap-chat-message ${role === 'user' ? 'is-user' : 'is-bot'}`;
+
+    const label = document.createElement('div');
+    label.className = "roadmap-chat-label";
+    label.textContent = role === 'user' ? '나' : '탐봇';
+
+    const body = document.createElement('div');
+    body.className = "roadmap-chat-body";
+    body.innerHTML = escapeHtml(text).replace(/\n/g, '<br>');
+
+    if (citations && citations.length > 0) {
+        const citeWrap = document.createElement('div');
+        citeWrap.className = "roadmap-chat-citations";
+        citeWrap.innerHTML = citations.slice(0, 5).map((item, index) => {
+            const title = escapeHtml(item.title || item.url || `출처 ${index + 1}`);
+            const url = escapeHtml(item.url || '#');
+            return `<a href="${url}" target="_blank" rel="noopener noreferrer">[${index + 1}] ${title}</a>`;
+        }).join('');
+        body.appendChild(citeWrap);
+    }
+
+    msg.appendChild(label);
+    msg.appendChild(body);
+    log.appendChild(msg);
+    log.scrollTop = log.scrollHeight;
+}
+
+function handleRoadmapChatKey(event) {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        sendRoadmapChat();
+    }
+}
+
+function useRoadmapChatPrompt(prompt) {
+    const input = document.getElementById('roadmap-chat-input');
+    if (input) input.value = prompt;
+    sendRoadmapChat(prompt);
+}
+
+async function sendRoadmapChat(promptOverride) {
+    const input = document.getElementById('roadmap-chat-input');
+    const sendBtn = document.getElementById('roadmap-chat-send');
+    const message = (promptOverride || (input ? input.value : '') || '').trim();
+    if (!message) return;
+
+    if (input) input.value = '';
+    if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = '질문 중...'; }
+
+    roadmapChatMessages.push({ role: 'user', content: message });
+    addRoadmapChatMessage('user', message);
+
+    try {
+        const hasRiasecScores = !!(lastScores && Object.keys(lastScores).length > 0);
+        const response = await fetch('/api/roadmap_chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                message,
+                messages: roadmapChatMessages.slice(-8),
+                job_name: selectedJob?.JK중분류 || '',
+                job_information: selectedJob?.직무정보 || '',
+                riasec_scores: lastScores,
+                has_riasec_scores: hasRiasecScores,
+                score_context_note: hasRiasecScores ? '' : '직무 직접 검색으로 들어온 경우에는 저장된 흥미점수가 없어 RIASEC 기반 답변을 제공할 수 없습니다.',
+                roadmap_text: lastRoadmapText,
+                recommendations: tempRecommendations,
+                user_major_status: lastMajorAnswer
+            })
+        });
+        const data = await response.json();
+
+        if (data.status === 'success') {
+            roadmapChatMessages.push({ role: 'assistant', content: data.reply });
+            addRoadmapChatMessage('assistant', data.reply, data.citations || []);
+        } else {
+            addRoadmapChatMessage('assistant', `잠시 답변을 드리기 어렵네요. ${data.message || ''}`.trim());
+        }
+    } catch (error) {
+        addRoadmapChatMessage('assistant', '서버 연결이 잠시 불안정해요. 조금 뒤 다시 물어봐 주세요.');
+    } finally {
+        if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = '질문'; }
+        if (input) input.focus();
+    }
 }
 
 // ── 공유 링크 복사 ──────────────────────────────────
@@ -809,7 +1041,7 @@ function buildRoadmapPanel() {
 
     const roadmapCards = Array.from(cards).filter(c => {
         const title = c.querySelector('.title');
-        return title && !title.textContent.includes('다른 길 찾기');
+        return title && !c.classList.contains('chatbot-stage-card');
     });
 
     roadmapCards.forEach((card, idx) => {

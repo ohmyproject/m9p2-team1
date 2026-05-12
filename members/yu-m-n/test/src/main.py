@@ -20,6 +20,7 @@ from pydantic import BaseModel
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 OPENAI_API_KEY = (os.getenv("OPENAI_API_KEY") or "").strip()
+OPENAI_MODEL = (os.getenv("OPENAI_MODEL", "gpt-5-mini") or "gpt-5-mini").strip().strip("'\"") or "gpt-5-mini"
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = (
     os.getenv("SUPABASE_PUBLISHABLE_KEY")
@@ -33,7 +34,10 @@ JK_JOB_SELECT = (
     "enterprising_score,conventional_score,major_required,job_information"
 )
 USER_ROADMAP_SELECT = "id,job_name,riasec_scores,roadmap_text,job_information,created_at"
+RIASEC_LABELS = ["현실형", "탐구형", "예술형", "사회형", "진취형", "관습형"]
 OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
+OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
+MAX_CHAT_CITATIONS = 5
 
 app = FastAPI()
 
@@ -74,15 +78,17 @@ def supabase_request(path, method="GET", params=None, body=None, token=None, pre
         raise RuntimeError(f"Supabase 요청 실패 ({e.code}): {detail}") from e
 
 
-def openai_chat_completion(messages, temperature=0.7, model="gpt-4o-mini"):
+def openai_chat_completion(messages, temperature=0.7, model=None):
     if not OPENAI_API_KEY:
         raise RuntimeError("OPENAI_API_KEY 환경 변수가 설정되지 않았습니다.")
 
+    selected_model = model or OPENAI_MODEL
     payload = {
-        "model": model,
+        "model": selected_model,
         "messages": messages,
-        "temperature": temperature,
     }
+    if temperature is not None and not selected_model.startswith("gpt-5"):
+        payload["temperature"] = temperature
     request = urllib.request.Request(
         OPENAI_CHAT_COMPLETIONS_URL,
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
@@ -112,6 +118,140 @@ def openai_chat_completion(messages, temperature=0.7, model="gpt-4o-mini"):
         return result["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as e:
         raise RuntimeError("OpenAI 응답 형식이 예상과 다릅니다.") from e
+
+
+def collect_response_output(result):
+    if result.get("output_text"):
+        reply = result["output_text"]
+    else:
+        parts = []
+        for item in result.get("output", []) or []:
+            if item.get("type") != "message":
+                continue
+            for content in item.get("content", []) or []:
+                text = content.get("text")
+                if text:
+                    parts.append(text)
+        reply = "\n".join(parts).strip()
+
+    citations = []
+    seen_urls = set()
+    for item in result.get("output", []) or []:
+        if item.get("type") != "message":
+            continue
+        for content in item.get("content", []) or []:
+            for annotation in content.get("annotations", []) or []:
+                if annotation.get("type") != "url_citation":
+                    continue
+                url = annotation.get("url")
+                if not url or url in seen_urls:
+                    continue
+                seen_urls.add(url)
+                citations.append({
+                    "url": url,
+                    "title": annotation.get("title") or url,
+                })
+                if len(citations) >= MAX_CHAT_CITATIONS:
+                    return reply, citations
+
+    return reply, citations
+
+
+def openai_roadmap_chat(messages, context_text):
+    if not OPENAI_API_KEY:
+        raise RuntimeError("OPENAI_API_KEY 환경 변수가 설정되지 않았습니다.")
+
+    chat_lines = []
+    for item in (messages or [])[-8:]:
+        role = item.get("role", "user")
+        content = str(item.get("content", "")).strip()
+        if role not in {"user", "assistant"} or not content:
+            continue
+        speaker = "사용자" if role == "user" else "상담봇"
+        chat_lines.append(f"{speaker}: {content[:1200]}")
+
+    system_prompt = """
+당신은 '노비 JOB아라'의 직무 탐색 도우미 챗봇 '탐봇'입니다.
+사용자가 추천받은 직무와 로드맵을 확인한 뒤, "이게 진짜 나한테 맞나?"를 검증하는 단계에서 등장합니다.
+
+[역할]
+1. 직무 적합성 검증: 사용자의 RIASEC 흥미 유형과 선택 직무가 실제로 잘 맞는지 분석하고, 장단점과 비전공자 진입 현실을 솔직하게 안내합니다.
+2. 대안 직무 탐색: 선택 직무와 유사하거나 진입 장벽이 낮은 대안 직무를 비교하여 제안합니다. 추천 직무 목록을 우선 활용하세요.
+3. 교육·강의 추천: 선택 직무 진입을 위한 국비지원 과정, 부트캠프, 온라인 강의, 자격증 정보를 안내합니다.
+
+[웹검색 활용 기준]
+- 아래 주제는 반드시 웹검색을 먼저 실행한 뒤 답변하세요. 학습된 지식만으로 답하지 마세요:
+  · 국비지원 교육 / 내일배움카드 / K-Digital Training 과정
+  · 부트캠프 추천 및 모집 일정
+  · 온라인 강의 추천 (인프런, 유데미 등)
+  · 자격증 취득 방법 및 시험 일정
+  · 채용 트렌드 / 채용 공고 우대사항
+- 검색 결과에서 뉴스 기사, 블로그 후기, 커뮤니티 글은 제외하세요. 반드시 아래 유형의 링크만 제시하세요:
+  · 교육 신청 페이지 (고용24, 각 부트캠프 공식 홈페이지 수강신청 페이지)
+  · 강의 구매/수강 페이지 (인프런 강의 페이지, 유데미 강의 페이지)
+  · 자격증 시험 접수 공식 페이지 (큐넷 등)
+- 검색 쿼리 예시: "[직무] K-Digital Training 신청 site:hrd.go.kr", "[직무] 부트캠프 수강신청 2026", "[직무] 인프런 강의", "[직무] 자격증 시험접수 site:q-net.or.kr"
+- 링크는 3~5개, 각 링크마다 과정명·기관명·신청 가능 여부를 한 줄로 요약해서 보여주세요.
+- 확인 가능한 직접 신청 링크가 없으면 "현재 신청 가능한 링크를 찾지 못했습니다. 고용24(hrd.go.kr)에서 직접 검색해보세요"라고 안내하세요.
+
+[답변 제한]
+- 자소서·이력서 작성 대행, 합격 보장·취업 성공 예측, 연봉 협상·면접 코칭 등은 범위 밖임을 안내하고, 직무 탐색 및 교육 관련 질문으로 유도하세요.
+- 날씨, 연예, 게임, 정치 논쟁, 의료/법률 판단 등 서비스 목적 밖 질문은 짧게 거절한 뒤 직무 상담으로 유도하세요.
+- RIASEC 점수가 없으면 흥미점수 기반 판단은 할 수 없다고 먼저 밝히고, 선택 직무와 로드맵 기준으로만 상담하세요.
+- 답변 말미에 "이 분석은 흥미 기반 탐색이며, 최종 진로 판정이 아님"을 자연스럽게 한 줄 덧붙이세요.
+
+[말투]
+친근하고 현실적인 한국어 일상 존댓말. 딱딱하지 않되 전문성은 유지하세요.
+
+[포맷]
+- 답변은 2~4개의 짧은 문단 또는 목록으로 나누고 문단 사이에 줄바꿈을 넣으세요.
+- 준비 순서·이유·다음 행동은 줄을 나눠 보여주세요. 한 문단에 몰아쓰지 마세요.
+""".strip()
+
+    user_input = f"""
+[상담 컨텍스트]
+{context_text}
+
+[최근 대화]
+{chr(10).join(chat_lines) if chat_lines else "아직 대화 없음"}
+""".strip()
+
+    payload = {
+        "model": OPENAI_MODEL,
+        "instructions": system_prompt,
+        "input": user_input,
+        "tools": [{"type": "web_search"}],
+        "tool_choice": "auto",
+    }
+    request = urllib.request.Request(
+        OPENAI_RESPONSES_URL,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {OPENAI_API_KEY}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="replace")
+        try:
+            parsed = json.loads(detail)
+            detail = parsed.get("error", {}).get("message", detail)
+        except json.JSONDecodeError:
+            pass
+        raise RuntimeError(f"OpenAI Responses 요청 실패 ({e.code}): {detail}") from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"OpenAI Responses 연결 실패: {e.reason}") from e
+
+    reply, citations = collect_response_output(result)
+    if not reply:
+        raise RuntimeError("OpenAI Responses 응답 형식이 예상과 다릅니다.")
+    return reply, citations
 
 
 def get_bearer_token(authorization: Optional[str]):
@@ -171,6 +311,34 @@ def save_user_roadmap(token, user_id, job_name, riasec_scores, roadmap_text, job
         prefer="return=representation",
     )
 
+
+def normalize_riasec_scores(scores):
+    if isinstance(scores, str):
+        try:
+            scores = json.loads(scores)
+        except json.JSONDecodeError as e:
+            raise ValueError("저장된 RIASEC 점수 형식이 올바르지 않습니다.") from e
+
+    if not isinstance(scores, dict) or not scores:
+        raise ValueError("저장된 RIASEC 점수가 비어 있습니다.")
+
+    normalized = {}
+    for label in RIASEC_LABELS:
+        values = scores.get(label)
+        if not isinstance(values, dict):
+            raise ValueError("저장된 RIASEC 점수에 필요한 흥미 유형이 없습니다.")
+
+        try:
+            raw_score = int(values["원점수"])
+            standard_score = int(values["표준점수"])
+        except (KeyError, TypeError, ValueError) as e:
+            raise ValueError("저장된 RIASEC 점수 값이 올바르지 않습니다.") from e
+
+        normalized[label] = {"원점수": raw_score, "표준점수": standard_score}
+
+    return normalized
+
+
 # --- 핵심 로직 함수들 (기존 코드 재사용) ---
 def extract_scores_from_pdf(pdf_bytes):
     reader = PdfReader(io.BytesIO(pdf_bytes))
@@ -187,8 +355,7 @@ def extract_scores_from_pdf(pdf_bytes):
 
     raw_scores = list(map(int, m.group(1).split()))
     std_scores = list(map(int, m.group(2).split()))
-    labels = ["현실형", "탐구형", "예술형", "사회형", "진취형", "관습형"]
-    return {label: {"원점수": raw, "표준점수": std} for label, raw, std in zip(labels, raw_scores, std_scores)}
+    return {label: {"원점수": raw, "표준점수": std} for label, raw, std in zip(RIASEC_LABELS, raw_scores, std_scores)}
 
 def recommend_jobs_for_user_profile(user_scores, df_data):
     if df_data.empty:
@@ -254,6 +421,74 @@ class RoadmapRequest(BaseModel):
     riasec_scores: Optional[dict] = None
     job_information: Optional[str] = None
 
+
+class RoadmapChatRequest(BaseModel):
+    message: str
+    messages: Optional[list[dict]] = None
+    job_name: Optional[str] = None
+    job_information: Optional[str] = None
+    riasec_scores: Optional[dict] = None
+    has_riasec_scores: Optional[bool] = None
+    score_context_note: Optional[str] = None
+    roadmap_text: Optional[str] = None
+    recommendations: Optional[list[dict]] = None
+    user_major_status: Optional[str] = None
+
+
+class DeleteRoadmapsRequest(BaseModel):
+    ids: list[str]
+
+
+def build_roadmap_chat_context(req: RoadmapChatRequest):
+    scores = req.riasec_scores if isinstance(req.riasec_scores, dict) else {}
+    has_scores = bool(scores) if req.has_riasec_scores is None else bool(req.has_riasec_scores and scores)
+    score_lines = []
+    if has_scores:
+        for label in RIASEC_LABELS:
+            values = scores.get(label) or {}
+            raw_score = values.get("원점수", "-")
+            standard_score = values.get("표준점수", "-")
+            score_lines.append(f"- {label}: 원점수 {raw_score}, 표준점수 {standard_score}")
+    else:
+        score_lines.append("- RIASEC 점수 없음")
+        score_lines.append("- 직무 직접 검색으로 들어온 경우 흥미점수 기반 상담은 제공할 수 없습니다.")
+        score_lines.append("- 점수 기반 상담이 필요하면 PDF 업로드 또는 점수 불러오기를 먼저 사용해야 합니다.")
+        if req.score_context_note:
+            score_lines.append(f"- 참고: {req.score_context_note}")
+
+    recommendation_lines = []
+    for idx, item in enumerate((req.recommendations or [])[:10], 1):
+        if not isinstance(item, dict):
+            continue
+        job_name = item.get("JK중분류") or item.get("job_name") or "직무명 없음"
+        similarity = item.get("최종유사도")
+        if isinstance(similarity, (int, float)):
+            recommendation_lines.append(f"{idx}. {job_name} (일치율 {round(similarity * 100)}%)")
+        else:
+            recommendation_lines.append(f"{idx}. {job_name}")
+
+    major_status = {
+        "yes": "관련 전공 또는 필수 전공 경험 있음",
+        "no": "비전공 또는 관련 전공 경험 없음",
+    }.get(req.user_major_status or "", req.user_major_status or "알 수 없음")
+
+    return f"""
+선택 직무: {req.job_name or "선택 직무 없음"}
+전공 여부: {major_status}
+직무 정보:
+{(req.job_information or "직무 정보 없음")[:2500]}
+
+RIASEC 점수:
+{chr(10).join(score_lines)}
+
+추천 직무 목록:
+{chr(10).join(recommendation_lines) if recommendation_lines else "추천 직무 목록 없음"}
+
+생성된 로드맵:
+{(req.roadmap_text or "로드맵 없음")[:8000]}
+""".strip()
+
+
 @app.get("/", response_class=HTMLResponse)
 async def read_index():
     # static 폴더 내의 index.html 반환
@@ -289,6 +524,52 @@ async def upload_pdf(file: UploadFile = File(...)):
         })
     except Exception as e:
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=400)
+
+@app.get("/api/latest_riasec_scores")
+async def latest_riasec_scores(authorization: Optional[str] = Header(default=None)):
+    try:
+        try:
+            token = get_bearer_token(authorization)
+        except ValueError as e:
+            return JSONResponse(content={"status": "error", "message": str(e)}, status_code=401)
+
+        if not token:
+            return JSONResponse(content={"status": "error", "message": "로그인이 필요합니다."}, status_code=401)
+
+        user = get_authenticated_user(token)
+        data = supabase_request(
+            "/rest/v1/user_roadmaps",
+            params={
+                "select": "id,riasec_scores,created_at",
+                "user_id": f"eq.{user['id']}",
+                "riasec_scores": "not.is.null",
+                "order": "created_at.desc",
+                "limit": "1",
+            },
+            token=token,
+        )
+        if not data:
+            return JSONResponse(
+                content={"status": "error", "message": "불러올 수 있는 저장된 점수가 없습니다."},
+                status_code=404,
+            )
+
+        try:
+            scores = normalize_riasec_scores(data[0].get("riasec_scores"))
+        except ValueError as e:
+            return JSONResponse(content={"status": "error", "message": str(e)}, status_code=404)
+
+        jobs_df = load_job_dataframe()
+        recommendations = recommend_jobs_for_user_profile(scores, jobs_df)
+
+        return {
+            "status": "success",
+            "scores": scores,
+            "recommendations": recommendations,
+            "source_created_at": data[0].get("created_at"),
+        }
+    except Exception as e:
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
 
 @app.get("/api/search_job")
 async def search_job(query: str):
@@ -354,6 +635,48 @@ async def delete_roadmap(roadmap_id: str, authorization: Optional[str] = Header(
         return JSONResponse(content={"status": "error", "message": "로드맵 ID가 올바르지 않습니다."}, status_code=400)
     except Exception as e:
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
+
+
+@app.post("/api/delete_roadmaps")
+async def delete_roadmaps(req: DeleteRoadmapsRequest, authorization: Optional[str] = Header(default=None)):
+    try:
+        token = get_bearer_token(authorization)
+        if not token:
+            return JSONResponse(content={"status": "error", "message": "로그인이 필요합니다."}, status_code=401)
+
+        if not req.ids:
+            return JSONResponse(content={"status": "error", "message": "삭제할 기록을 선택해주세요."}, status_code=400)
+
+        roadmap_ids = []
+        for roadmap_id in req.ids:
+            try:
+                roadmap_uuid = str(UUID(str(roadmap_id)))
+            except (TypeError, ValueError):
+                return JSONResponse(content={"status": "error", "message": "로드맵 ID가 올바르지 않습니다."}, status_code=400)
+            if roadmap_uuid not in roadmap_ids:
+                roadmap_ids.append(roadmap_uuid)
+
+        user = get_authenticated_user(token)
+        deleted = supabase_request(
+            "/rest/v1/user_roadmaps",
+            method="DELETE",
+            params={
+                "id": f"in.({','.join(roadmap_ids)})",
+                "user_id": f"eq.{user['id']}",
+            },
+            token=token,
+            prefer="return=representation",
+        )
+        if not deleted:
+            return JSONResponse(content={"status": "error", "message": "삭제할 기록을 찾을 수 없습니다."}, status_code=404)
+
+        deleted_ids = [item.get("id") for item in deleted if isinstance(item, dict) and item.get("id")]
+        return {"status": "success", "deleted_count": len(deleted), "deleted_ids": deleted_ids}
+    except ValueError as e:
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=401)
+    except Exception as e:
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
+
 
 @app.post("/api/roadmap")
 async def generate_roadmap(req: RoadmapRequest, authorization: Optional[str] = Header(default=None)):
@@ -543,9 +866,25 @@ async def generate_roadmap(req: RoadmapRequest, authorization: Optional[str] = H
     except Exception as e:
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
 
+
+@app.post("/api/roadmap_chat")
+async def roadmap_chat(req: RoadmapChatRequest):
+    if not req.message or not req.message.strip():
+        return JSONResponse(content={"status": "error", "message": "질문을 입력해주세요."}, status_code=400)
+
+    try:
+        messages = req.messages or []
+        if not messages or messages[-1].get("content") != req.message:
+            messages = [*messages, {"role": "user", "content": req.message}]
+        context_text = build_roadmap_chat_context(req)
+        reply, citations = openai_roadmap_chat(messages, context_text)
+        return {"status": "success", "reply": reply, "citations": citations}
+    except Exception as e:
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
+
 # 모든 API 정의 후에 정적 파일 서빙 설정
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
+    uvicorn.run(app, host="127.0.0.1", port=int(os.getenv("PORT", "8000")))
