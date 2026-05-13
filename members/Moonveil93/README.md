@@ -20,38 +20,46 @@
 5. **문서 바치기 (PDF 분석 및 가이드)**: 
    - 워크넷 직업선호도검사(L형) 결과지를 업로드하면 흥미 유형(RIASEC) 점수를 자동으로 추출합니다.
    - 처음 방문하는 사용자를 위해 고용24 검사 방법 및 PDF 다운로드 안내 가이드를 대화창에 추가했습니다.
-2. **⚖️ RIASEC 시각적 분석 UI**: 
+6. **⚖️ RIASEC 시각적 분석 UI**: 
    - 사용자의 상대적 강점을 한눈에 보여주는 **게이지 바(Bar Chart)** 형태의 UI를 적용했습니다.
    - 상위 3개 흥미 코드 조합과 대표 유형을 '인장(Seal)' 스타일의 박스로 강조했습니다.
-3. **관아의 방보 (직무 추천)**: 추출된 점수와 직무 데이터베이스를 비교하여 상위 10개 직무를 추천합니다.
-4. **📜 직무 상세 정보 확인**: 추천 목록에서 직무를 클릭하면 해당 직무의 상세 정의와 정보를 먼저 읽어볼 수 있습니다.
-5. **🔍 하이브리드 직무 접근 시스템**: 
+7. **관아의 방보 (직무 추천)**: 추출된 점수와 직무 데이터베이스를 비교하여 상위 10개 직무를 추천합니다.
+8. **📜 직무 상세 정보 확인**: 추천 목록에서 직무를 클릭하면 해당 직무의 상세 정의와 정보를 먼저 읽어볼 수 있습니다.
+9. **🔍 하이브리드 직무 접근 시스템**: 
    - **PDF 기반 추천**: 자질 문서를 바치면 기질에 맞는 직무를 추천받습니다.
    - **직접 검색**: 대화창 우측의 검색창을 통해 원하는 직무를 직접 검색하여 정보와 로드맵을 즉시 확인할 수 있습니다. (플로팅 팝업창 UI 적용)
-6. **🗺️ 지능형 로드맵 UI & 강력한 파싱**: 
+10. **🗺️ 지능형 로드맵 UI & 강력한 파싱**: 
    - **가로 슬라이드 방식**: % 기반 이동 로직을 적용하여 화면 크기에 관계없이 1px의 오차 없는 정밀한 슬라이딩을 구현했습니다.
    - **3단 정보 구획화**: AI가 생성한 로드맵을 '본문', '결과물(아이템)', '현실적 Tip(비법)'으로 자동 분류하여 가독성을 극대화했습니다.
    - **마크다운 호환 파싱**: AI가 사용하는 볼드(`**`), 특수 기호, 아이콘 등이 다른 구역으로 새어나가지 않도록 탐욕적 정규식과 청소 로직을 적용하여 완벽한 데이터 분리를 실현했습니다.
    - **구조적 안정성**: `div` 기반의 유연한 컨테이너 구조를 채택하여 스크롤 발생 시에도 레이아웃이 붕괴되지 않습니다.
-7. **신분 상승의 길 (AI 로드맵)**: OpenAI GPT-4o-mini 모델이 사용자의 직무와 전공 상태를 분석하여 초개인화된 3단계 취업 성공 비기를 하사합니다.
+11. **신분 상승의 길 (AI 로드맵)**: OpenAI GPT-4o-mini 모델이 사용자의 직무와 전공 상태를 분석하여 초개인화된 3단계 취업 성공 비기를 하사합니다.
+12. **💬 LangChain RAG 지능형 AI 대감 챗봇 (상담 고도화)**: 
+   - **Vector DB 기반 지식 검색**: 수천 개의 직무 데이터를 벡터화하여 질문에 가장 적합한 정보를 실시간으로 추출하여 답변의 전문성을 극대화했습니다.
+   - **데이터 기반 적합성 분석**: 사용자의 실제 RIASEC 점수와 직무 요구 역량을 수치적으로 정밀하게 대조하여 날카로운 분석을 하사합니다.
+   - **맞춤형 대안 제시**: 현재 직무가 맞지 않을 경우, 사용자의 기질 강점을 극대화할 수 있는 최적의 다른 일거리를 DB에서 찾아 실시간으로 역제안합니다.
+   - **조선시대 페르소나**: 15년 경력의 베테랑 컨설턴트 'AI 대감' 페르소나를 적용하여, 엄중하고 호탕한 말투로 고품격 상담을 제공합니다.
+13. **🔥 기록 일괄 소각 (전체 삭제)**: 
+   - '나의 기록' 메뉴에서 쌓인 모든 비기를 한 번에 삭제할 수 있는 기능을 추가하여 데이터 관리 편의성을 극대화했습니다.
+   - 실수 방지를 위한 이중 확인 시스템을 적용했습니다.
+14. **안정적인 하이브리드 통신**: 기본 기능은 `urllib` 기반 REST 통신을, 고도화된 AI 상담은 `LangChain` 프레임워크를 활용하여 안정성과 기능성을 동시에 확보했습니다.
 
 ### 🛠 기술 스택
 - **Backend**: FastAPI (Python 3.10+)
 - **Frontend**: HTML5, Vanilla JS, CSS3 (NES.css 라이브러리 활용)
-- **Database & Auth**: Supabase (PostgreSQL, JWT 인증)
-- **AI**: OpenAI API (GPT-4o-mini)
-- **Data Analysis**: Pandas, NumPy, Scikit-learn
-- **PDF Processing**: PyPDF
+- **Database & Auth**: Supabase (PostgreSQL + pgvector 활용)
+- **AI/LLM**: OpenAI API (GPT-4o-mini, text-embedding-3-small), LangChain
+- **Data Analysis**: Pandas, NumPy
+- **PDF Processing**: pypdf
 
 ## 디렉토리 구조
 
 ```
 .
 ├── .env                       ← API 키 설정 파일
-├── main.py                    ← 메인 서버 코드 (FastAPI)
-├── app.py                     ← 백엔드 로직
-├── 잡코리아_Onet통합본_직무정보추가.csv ← 직무 데이터베이스
-├── NCS_All_Job_Descriptions.csv ← NCS 직무 정보
+├── main.py                    ← 메인 서버 코드 및 백엔드 로직 (FastAPI + LangChain RAG)
+├── embed_data.py              ← 직무 데이터 벡터 임베딩 및 DB 업로드 스크립트
+├── 잡코리아_Onet통합본_직무정보추가.csv ← 직무 데이터베이스 (Supabase 적재용)
 ├── DEVLOG.md                  ← 변경사항 기록
 ├── README.md                  ← 이 파일
 ├── static/                    ← 프론트엔드 정적 파일
@@ -62,14 +70,18 @@
 
 ```bash
 # 필요한 라이브러리 설치
-pip install fastapi uvicorn pandas numpy python-dotenv pypdf openai supabase
+pip install fastapi uvicorn pandas numpy python-dotenv pypdf openai supabase langchain langchain-openai langchain-community
 
 # .env 파일 설정
 # OPENAI_API_KEY=...
 # SUPABASE_URL=...
 # SUPABASE_ANON_KEY=...
 
-# 서버 실행
+# 1. 초기 데이터 임베딩 (최초 1회)
+# Supabase SQL Editor에서 pgvector 확장 및 match_jobs 함수 생성 후 실행
+python embed_data.py
+
+# 2. 서버 실행
 python main.py
 ```
 

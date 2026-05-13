@@ -169,6 +169,112 @@ body, html {
     background-color: #f8e5c0 !important;
 }
 
+.roadmap-final-actions {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 18px;
+}
+
+.chatbot-stage-card {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden !important;
+}
+
+.roadmap-chat-intro {
+    font-size: 14px !important;
+    line-height: 1.6 !important;
+    color: #3a2a10 !important;
+    margin-bottom: 10px !important;
+}
+
+.roadmap-chat-suggestions {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 8px;
+    margin-bottom: 10px !important;
+    overflow-x: auto;
+}
+
+.roadmap-chat-suggestions .nes-btn {
+    font-size: 11px !important;
+    padding: 4px 8px !important;
+    white-space: nowrap;
+}
+
+.roadmap-chat-log {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    background: rgba(255, 249, 196, 0.38);
+    border: 2px solid var(--gold-dk);
+    border-radius: 4px;
+    padding: 12px;
+    margin-bottom: 10px !important;
+}
+
+.roadmap-chat-message {
+    max-width: 88%;
+    margin-bottom: 10px !important;
+}
+
+.roadmap-chat-message.is-user {
+    margin-left: auto;
+}
+
+.roadmap-chat-label {
+    font-size: 11px !important;
+    line-height: 1.2 !important;
+    color: #5c3a1e !important;
+    margin-bottom: 4px !important;
+}
+
+.roadmap-chat-body {
+    font-size: 13px !important;
+    line-height: 1.75 !important;
+    color: #212529 !important;
+    background: #fff8dc;
+    border: 2px solid #8b6b3d;
+    border-radius: 4px;
+    padding: 8px 10px;
+    box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.18);
+}
+
+.roadmap-chat-message.is-user .roadmap-chat-body {
+    background: #e6f7ed;
+    border-color: var(--green-jade);
+}
+
+.roadmap-chat-citations {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 8px !important;
+}
+
+.roadmap-chat-citations a {
+    font-size: 11px !important;
+    line-height: 1.35 !important;
+    color: #2e7d32 !important;
+    word-break: break-word;
+}
+
+.roadmap-chat-input-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 0 !important;
+    flex-wrap: nowrap;
+}
+
+.roadmap-chat-input-row .nes-input {
+    min-width: 0;
+    flex: 1;
+}
+
 /* --- 슬라이드 좌우 화살표 버튼 스타일 --- */
 .slide-btn {
     position: absolute;
@@ -452,6 +558,71 @@ text-decoration: none;
 .auth-small-btn--danger { border-color: #e76e55; color: #e76e55; }
 .auth-small-btn--danger:hover { background: rgba(231, 110, 85, 0.15); }
 
+.history-bulk-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 18px;
+    padding: 10px 0 14px;
+    background: #212529;
+    border-bottom: 2px solid #f7d51d;
+}
+
+.history-select-all,
+.history-bulk-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #fff;
+}
+
+.history-select-all input,
+.history-card-check input {
+    width: 20px;
+    height: 20px;
+    cursor: pointer;
+}
+
+.history-card {
+    margin-bottom: 20px;
+    background: #fff !important;
+    color: #000 !important;
+}
+
+.history-card-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+}
+
+.history-card-check {
+    display: flex;
+    align-items: center;
+    flex: 0 0 auto;
+}
+
+.history-card-desc {
+    flex: 1 1 220px;
+    line-height: 1.5;
+}
+
+.history-card-actions {
+    display: flex;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+#history-delete-selected:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
 /* =============================================
    Phase 2 대화창 — 양피지 스타일
    ============================================= */
@@ -498,6 +669,17 @@ text-decoration: none;
 }
 .option-link:hover { text-decoration: underline; }
 .option-input { display: flex; align-items: center; gap: 8px; }
+.upload-submit-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    flex-shrink: 0;
+}
+.upload-submit-stack .nes-btn {
+    min-width: 128px;
+    white-space: nowrap;
+}
 .option-divider {
     align-self: center;
     font-size: 13px;

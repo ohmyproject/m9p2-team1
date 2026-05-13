@@ -9,3 +9,7 @@ python-dotenv
 pypdf
 openai
 supabase
+pydantic
+langchain
+langchain-openai
+langchain-community
