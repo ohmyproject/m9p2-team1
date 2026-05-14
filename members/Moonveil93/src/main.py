@@ -12,7 +12,7 @@ from typing import Optional, List, Dict, Any
 from dotenv import load_dotenv
 from pypdf import PdfReader
 from fastapi import FastAPI, UploadFile, File, Header
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -727,14 +727,18 @@ async def roadmap_chat(req: RoadmapChatRequest):
         if req.roadmap_text:
             user_context += f"- 생성된 로드맵 요약: {req.roadmap_text[:200]}..."
 
-        # 체인 실행
-        result = chain.invoke({
-            "input": req.message,
-            "user_context": user_context,
-            "chat_history": history_str
-        })
-        
-        return {"status": "success", "reply": result, "citations": []}
+        async def event_generator():
+            try:
+                async for chunk in chain.astream({
+                    "input": req.message,
+                    "user_context": user_context,
+                    "chat_history": history_str
+                }):
+                    yield chunk
+            except Exception as e:
+                yield f"\n[오류 발생]: {str(e)}"
+
+        return StreamingResponse(event_generator(), media_type="text/plain")
     except Exception as e:
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
 

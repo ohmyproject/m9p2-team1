@@ -644,7 +644,7 @@ function escapeHtml(text) {
 
 function addRoadmapChatMessage(role, text, citations = []) {
     const log = document.getElementById('roadmap-chat-log');
-    if (!log) return;
+    if (!log) return null;
 
     const msg = document.createElement('div');
     msg.className = `roadmap-chat-message ${role === 'user' ? 'is-user' : 'is-bot'}`;
@@ -672,6 +672,8 @@ function addRoadmapChatMessage(role, text, citations = []) {
     msg.appendChild(body);
     log.appendChild(msg);
     log.scrollTop = log.scrollHeight;
+    
+    return body; // 실시간 업데이트를 위해 body 요소 반환
 }
 
 function handleRoadmapChatKey(event) {
@@ -699,6 +701,10 @@ async function sendRoadmapChat(promptOverride) {
     roadmapChatMessages.push({ role: 'user', content: message });
     addRoadmapChatMessage('user', message);
 
+    // 봇 응답을 위한 빈 메시지 박스 생성
+    const botMsgBody = addRoadmapChatMessage('assistant', '');
+    let fullReply = "";
+
     try {
         const hasRiasecScores = !!(lastScores && Object.keys(lastScores).length > 0);
         const response = await fetch('/api/roadmap_chat', {
@@ -717,16 +723,34 @@ async function sendRoadmapChat(promptOverride) {
                 user_major_status: lastMajorAnswer
             })
         });
-        const data = await response.json();
 
-        if (data.status === 'success') {
-            roadmapChatMessages.push({ role: 'assistant', content: data.reply });
-            addRoadmapChatMessage('assistant', data.reply, data.citations || []);
-        } else {
-            addRoadmapChatMessage('assistant', `잠시 답변을 드리기 어렵네요. ${data.message || ''}`.trim());
+        if (!response.ok) {
+            const errorData = await response.json();
+            if (botMsgBody) botMsgBody.innerHTML = `잠시 답변을 드리기 어렵네요. ${errorData.message || ''}`.trim();
+            return;
         }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        const log = document.getElementById('roadmap-chat-log');
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            const chunk = decoder.decode(value, { stream: true });
+            fullReply += chunk;
+            
+            // 실시간 텍스트 업데이트 (이스케이프 및 줄바꿈 처리)
+            if (botMsgBody) {
+                botMsgBody.innerHTML = escapeHtml(fullReply).replace(/\n/g, '<br>');
+            }
+            if (log) log.scrollTop = log.scrollHeight;
+        }
+
+        roadmapChatMessages.push({ role: 'assistant', content: fullReply });
     } catch (error) {
-        addRoadmapChatMessage('assistant', '서버 연결이 잠시 불안정해요. 조금 뒤 다시 물어봐 주세요.');
+        if (botMsgBody) botMsgBody.innerHTML = '서버 연결이 잠시 불안정해요. 조금 뒤 다시 물어봐 주세요.';
     } finally {
         if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = '질문'; }
         if (input) input.focus();
