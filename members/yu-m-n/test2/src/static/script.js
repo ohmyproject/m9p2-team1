@@ -733,58 +733,6 @@ async function sendRoadmapChat(promptOverride) {
     }
 }
 
-// ── 공유 링크 복사 ──────────────────────────────────
-async function saveAndShare() {
-    if (!selectedJob || !lastRoadmapText) { alert("저장할 로드맵이 없사옵니다!"); return; }
-
-    const btn = document.querySelector('#search-results ~ div .nes-btn.is-primary');
-    if (btn) { btn.disabled = true; btn.innerText = "링크 생성 중..."; }
-
-    try {
-        if (_sharedResultId) { copyShareLink(_sharedResultId); return; }
-
-        const res  = await fetch('/api/save_result', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                job_name:      selectedJob.JK중분류 || String(selectedJob),
-                riasec_scores: lastScores  || {},
-                roadmap_text:  lastRoadmapText
-            })
-        });
-        const data = await res.json();
-        if (data.status === 'success') { _sharedResultId = data.result_id; copyShareLink(_sharedResultId); }
-        else { alert("링크 생성 실패: " + data.message); }
-    } catch (e) {
-        alert("서버 연결 실패!");
-    } finally {
-        if (btn) { btn.disabled = false; btn.innerText = "🔗 결과 링크 복사"; }
-    }
-}
-
-function copyShareLink(resultId) {
-    const url = `${window.location.origin}/result/${resultId}`;
-    navigator.clipboard.writeText(url)
-        .then(() => showToast("📎 링크가 복사되었사옵니다!\n친구에게 붙여넣기로 자랑하시게."))
-        .catch(() => prompt("아래 링크를 복사하시게:", url));
-}
-
-function showToast(msg) {
-    const old = document.getElementById('share-toast');
-    if (old) old.remove();
-    const t = document.createElement('div');
-    t.id = 'share-toast';
-    t.style.cssText = [
-        'position:fixed','bottom:30px','left:50%','transform:translateX(-50%)',
-        'background:#212529','color:#f7d51d','border:3px solid #f7d51d',
-        'padding:14px 24px','font-family:DungGeunMo,sans-serif','font-size:16px',
-        'z-index:9999','text-align:center','line-height:1.6',
-        'box-shadow:6px 6px 0 #000','white-space:pre-line'
-    ].join(';');
-    t.innerText = msg;
-    document.body.appendChild(t);
-    setTimeout(() => t.remove(), 3000);
-}
 
 // ─────────────────────────────────────────────
 // 📸 이미지 저장: RIASEC 점수 + 직무 정보 + 로드맵 가로 배치

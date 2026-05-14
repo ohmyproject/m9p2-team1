@@ -4,11 +4,9 @@ let currentSession = null;
 let lastScores = null; // 최근 추출된 RIASEC 점수 저장
 let lastMajorAnswer = null;
 let roadmapChatMessages = [];
-
-// ── 채팅 영구 기억 ──
-let currentRoadmapId = null;       // 현재 로드맵 ID (저장 키)
-let roadmapChatSummary = "";       // LangChain 요약본
-let roadmapChatEmbeddings = [];    // 벡터 임베딩 데이터
+let activeRoadmapId = null;
+let activeThreadId = null;
+let activeSessionId = null;
 
 async function initSupabase() {
     try {
@@ -237,12 +235,12 @@ async function deleteSavedRoadmap(roadmapId, btnElement) {
 function viewSavedRoadmap(item) {
     document.getElementById('history-modal').classList.add('hidden');
     selectedJob = { JK중분류: item.job_name, 직무정보: item.job_information || '' };
+    // 챗봇이 흥미점수를 읽을 수 있도록 lastScores에도 저장
     lastScores = item.riasec_scores || {};
-    // 기억 관련 상태 초기화 — loadChatHistory가 채워줌
-    currentRoadmapId = item.id;
-    roadmapChatMessages = [];
-    roadmapChatSummary = "";
-    roadmapChatEmbeddings = [];
+    lastRoadmapText = item.roadmap_text || '';
+    activeRoadmapId = item.id || null;
+    activeThreadId = null;
+    activeSessionId = null;
     renderScores(lastScores);
     renderRoadmapFromText(item.roadmap_text);
     nextPhase(6);
@@ -260,8 +258,7 @@ const dialogues = {
 
 let selectedJob = null;
 let tempRecommendations = [];
-let lastRoadmapText = null;   // 공유 링크·이미지 저장용
-let _sharedResultId  = null;  // 이미 저장된 UUID 캐싱
+let lastRoadmapText = null;   // 챗봇 맥락·이미지 저장용
 
 function typeWriter(text, elementId, callback) {
     let i = 0;
@@ -493,6 +490,9 @@ function renderJobList(jobs) {
 async function showRoadmap(answer) {
     if (!selectedJob) { alert("선택된 직무가 없사옵니다!"); return; }
     lastMajorAnswer = answer;
+    activeRoadmapId = null;
+    activeThreadId = null;
+    activeSessionId = null;
 
     document.getElementById('typewriter-5').innerText = "AI 대감이 맞춤형 신분 상승의 길을 점치고 있사옵니다...\n잠시만 기다려 주시옵소서.";
     document.getElementById('action-5').classList.add('hidden');
@@ -519,12 +519,9 @@ async function showRoadmap(answer) {
 
         if (data.status === 'success') {
             lastRoadmapText  = data.roadmap;
-            _sharedResultId  = null;
-            // 새 로드맵 ID 저장 — 채팅 기억의 저장 키
-            currentRoadmapId = data.roadmap_id || null;
-            roadmapChatMessages = [];
-            roadmapChatSummary = "";
-            roadmapChatEmbeddings = [];
+            activeRoadmapId = data.roadmap_id || null;
+            activeThreadId = data.thread_id || null;
+            activeSessionId = data.session_id || null;
             renderRoadmapFromText(data.roadmap);
             nextPhase(6);
         } else {
@@ -628,12 +625,6 @@ function renderRoadmapFromText(rawText) {
     `;
     container.appendChild(chatStage);
     addRoadmapChatMessage("assistant", "안녕하세요! 직무 탐색 도우미 탐봇이에요 👋\n\n로드맵까지 받으셨군요! 이제 '이 직무가 진짜 나한테 맞나?'를 같이 검증해봐요.\n\n✅ 직무 적합성 검증 — 내 흥미 유형과 이 직무가 맞는지 분석\n🔄 대안 직무 비교 — 비슷하거나 진입이 더 쉬운 직무 탐색\n\n위 버튼을 눌러보거나, 궁금한 걸 바로 물어보세요!");
-
-    // 로그인 상태이고 roadmap_id가 있으면 과거 대화 불러오기
-    if (currentSession && currentRoadmapId) {
-        loadChatHistory(currentRoadmapId);
-    }
-
     updateSlideButtons();
 }
 
@@ -664,7 +655,7 @@ function escapeHtml(text) {
 
 function addRoadmapChatMessage(role, text, citations = []) {
     const log = document.getElementById('roadmap-chat-log');
-    if (!log) return;
+    if (!log) return null;
 
     const msg = document.createElement('div');
     msg.className = `roadmap-chat-message ${role === 'user' ? 'is-user' : 'is-bot'}`;
@@ -692,78 +683,14 @@ function addRoadmapChatMessage(role, text, citations = []) {
     msg.appendChild(body);
     log.appendChild(msg);
     log.scrollTop = log.scrollHeight;
+
+    return body; // 실시간 업데이트를 위해 body 요소 반환
 }
 
 function handleRoadmapChatKey(event) {
     if (event.key === 'Enter') {
         event.preventDefault();
         sendRoadmapChat();
-    }
-}
-
-// ── 채팅 기록 불러오기 ───────────────────────────────────────
-async function loadChatHistory(roadmapId) {
-    if (!currentSession || !roadmapId) return;
-    try {
-        const res = await fetch(`/api/chat_history/${roadmapId}`, {
-            headers: { 'Authorization': `Bearer ${currentSession.access_token}` }
-        });
-        const data = await res.json();
-        if (data.status !== 'success' || !data.has_history || !data.messages.length) return;
-
-        // 상태 복원
-        roadmapChatMessages = data.messages;
-        roadmapChatSummary = data.summary || '';
-        roadmapChatEmbeddings = data.message_embeddings || [];
-
-        // UI 복원 — 기존 초기 안내 메시지 위에 과거 대화 삽입
-        const log = document.getElementById('roadmap-chat-log');
-        if (!log) return;
-        log.innerHTML = '';
-
-        // 기억 배지
-        const badge = document.createElement('div');
-        badge.className = 'chat-memory-badge';
-        badge.innerHTML = `🧠 이전 대화 <strong>${data.messages.length}개</strong> 기억 불러옴`;
-        log.appendChild(badge);
-
-        // 최근 10개만 렌더링 (너무 많으면 스크롤 불편)
-        data.messages.slice(-10).forEach(msg => {
-            addRoadmapChatMessage(msg.role, msg.content, []);
-        });
-
-        // 구분선
-        const sep = document.createElement('div');
-        sep.className = 'chat-memory-divider';
-        sep.textContent = '── 새 대화 시작 ──';
-        log.appendChild(sep);
-    } catch (e) {
-        console.warn('[탐봇] 채팅 기록 불러오기 실패:', e);
-    }
-}
-
-// ── 채팅 기록 저장 (비동기 — UI 블로킹 없음) ────────────────
-async function saveChatHistoryAsync() {
-    if (!currentSession || !currentRoadmapId) return;
-    try {
-        const res = await fetch('/api/chat_history/save', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${currentSession.access_token}`
-            },
-            body: JSON.stringify({
-                roadmap_id: currentRoadmapId,
-                messages: roadmapChatMessages,
-                summary: roadmapChatSummary
-            })
-        });
-        const data = await res.json();
-        if (data.status === 'success' && data.summary) {
-            roadmapChatSummary = data.summary;  // LangChain 요약 업데이트
-        }
-    } catch (e) {
-        console.warn('[탐봇] 채팅 기록 저장 실패:', e);
     }
 }
 
@@ -785,14 +712,23 @@ async function sendRoadmapChat(promptOverride) {
     roadmapChatMessages.push({ role: 'user', content: message });
     addRoadmapChatMessage('user', message);
 
+    const botMsgBody = addRoadmapChatMessage('assistant', '');
+    let fullReply = "";
+
     try {
         const hasRiasecScores = !!(lastScores && Object.keys(lastScores).length > 0);
+        const headers = { 'Content-Type': 'application/json' };
+        if (currentSession) { headers['Authorization'] = `Bearer ${currentSession.access_token}`; }
+
         const response = await fetch('/api/roadmap_chat', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: headers,
             body: JSON.stringify({
                 message,
                 messages: roadmapChatMessages.slice(-8),
+                roadmap_id: activeRoadmapId,
+                thread_id: activeThreadId,
+                session_id: activeSessionId,
                 job_name: selectedJob?.JK중분류 || '',
                 job_information: selectedJob?.직무정보 || '',
                 riasec_scores: lastScores,
@@ -800,31 +736,66 @@ async function sendRoadmapChat(promptOverride) {
                 score_context_note: hasRiasecScores ? '' : '직무 직접 검색으로 들어온 경우에는 저장된 흥미점수가 없어 RIASEC 기반 답변을 제공할 수 없습니다.',
                 roadmap_text: lastRoadmapText,
                 recommendations: tempRecommendations,
-                user_major_status: lastMajorAnswer,
-                conversation_summary: roadmapChatSummary,
-                message_embeddings: roadmapChatEmbeddings
+                user_major_status: lastMajorAnswer
             })
         });
-        const data = await response.json();
 
-        if (data.status === 'success') {
-            roadmapChatMessages.push({ role: 'assistant', content: data.reply });
-            addRoadmapChatMessage('assistant', data.reply, data.citations || []);
-            // 로그인 + roadmap_id 있을 때만 저장
-            if (currentSession && currentRoadmapId) {
-                saveChatHistoryAsync();
+        // 에러 응답 안전하게 파싱
+        if (!response.ok) {
+            let msg = '';
+            try {
+                const errorData = await response.json();
+                msg = errorData.message || '';
+            } catch {
+                msg = `(HTTP ${response.status})`;
             }
-        } else {
-            addRoadmapChatMessage('assistant', `잠시 답변을 드리기 어렵네요. ${data.message || ''}`.trim());
+            if (botMsgBody) botMsgBody.innerHTML = `잠시 답변을 드리기 어렵네요. ${msg}`.trim();
+            return;
         }
+
+        // 헤더에서 thread/session ID 수신
+        const newThreadId = response.headers.get('X-Thread-Id');
+        const newSessionId = response.headers.get('X-Session-Id');
+        if (newThreadId) activeThreadId = newThreadId;
+        if (newSessionId) activeSessionId = newSessionId;
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        const log = document.getElementById('roadmap-chat-log');
+
+        while (true) {
+            const { done, value } = await reader.read();
+
+            // 스트림 종료 시 TextDecoder 버퍼 플러시
+            if (done) {
+                const remaining = decoder.decode();
+                if (remaining) {
+                    fullReply += remaining;
+                    if (botMsgBody) {
+                        botMsgBody.innerHTML = escapeHtml(fullReply).replace(/\n/g, '<br>');
+                    }
+                }
+                break;
+            }
+
+            const chunk = decoder.decode(value, { stream: true });
+            fullReply += chunk;
+
+            if (botMsgBody) {
+                botMsgBody.innerHTML = escapeHtml(fullReply).replace(/\n/g, '<br>');
+            }
+            if (log) log.scrollTop = log.scrollHeight;
+        }
+
+        roadmapChatMessages.push({ role: 'assistant', content: fullReply });
+
     } catch (error) {
-        addRoadmapChatMessage('assistant', '서버 연결이 잠시 불안정해요. 조금 뒤 다시 물어봐 주세요.');
+        if (botMsgBody) botMsgBody.innerHTML = '서버 연결이 잠시 불안정해요. 조금 뒤 다시 물어봐 주세요.';
     } finally {
         if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = '질문'; }
         if (input) input.focus();
     }
 }
-
 
 // ─────────────────────────────────────────────
 // 📸 이미지 저장: RIASEC 점수 + 직무 정보 + 로드맵 가로 배치
