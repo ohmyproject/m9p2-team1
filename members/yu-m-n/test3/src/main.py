@@ -28,7 +28,7 @@ from supabase import create_client, Client
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 OPENAI_API_KEY = (os.getenv("OPENAI_API_KEY") or "").strip()
-OPENAI_MODEL = (os.getenv("OPENAI_MODEL", "gpt-4o-mini") or "gpt-4o-mini").strip().strip("'\"") or "gpt-4o-mini"
+OPENAI_MODEL = (os.getenv("OPENAI_MODEL", "gpt-5-mini") or "gpt-5-mini").strip().strip("'\"") or "gpt-5-mini"
 SUPABASE_URL = (os.getenv("SUPABASE_URL") or "").strip()
 SUPABASE_PUBLIC_KEY = (
     os.getenv("SUPABASE_PUBLISHABLE_KEY")
