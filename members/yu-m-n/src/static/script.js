@@ -538,7 +538,7 @@ function renderJobList(jobs) {
         btn.style.width = "100%";
         btn.style.marginBottom = "10px";
         btn.style.textAlign = "left";
-        btn.innerText = `${index + 1}. ${job.JK중분류} (일치율: ${Math.round(job.최종유사도 * 100)}%)`;
+        btn.innerText = `${index + 1}. ${job.JK중분류} (일치율: ${(job.최종유사도 * 100).toFixed(2)}%)`;
         btn.onclick = () => { showJobDetail(job, 4); };
         container.appendChild(btn);
     });
