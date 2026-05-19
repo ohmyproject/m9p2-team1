@@ -60,20 +60,68 @@ async function handleSignOut() {
     if (error) alert("로그아웃 오류: " + error.message);
 }
 
+async function clearLocalAuthSession() {
+    currentSession = null;
+    updateAuthUI(null);
+
+    if (!supabaseClient) return;
+    try {
+        await supabaseClient.auth.signOut({ scope: 'local' });
+    } catch (error) {
+        console.warn("로컬 세션 정리 실패:", error);
+    }
+}
+
+async function getFreshAccessToken(options = {}) {
+    const required = options.required === true;
+
+    if (!supabaseClient) {
+        if (required) throw new Error("로그인이 필요합니다.");
+        return null;
+    }
+
+    const { data: sessionData, error: sessionError } = await supabaseClient.auth.getSession();
+    const session = sessionData?.session || null;
+    if (sessionError || !session) {
+        await clearLocalAuthSession();
+        if (required) throw new Error("로그인이 필요합니다.");
+        return null;
+    }
+
+    const { data: userData, error: userError } = await supabaseClient.auth.getUser();
+    if (userError || !userData?.user) {
+        await clearLocalAuthSession();
+        if (required) throw new Error("로그인 세션이 만료되었습니다. 다시 로그인해주세요.");
+        return null;
+    }
+
+    const { data: freshSessionData } = await supabaseClient.auth.getSession();
+    currentSession = freshSessionData?.session || session;
+    updateAuthUI(currentSession);
+    return currentSession?.access_token || null;
+}
+
+async function throwIfAuthExpired(response, data) {
+    if (response.status !== 401) return;
+
+    await clearLocalAuthSession();
+    throw new Error(data?.message || "로그인 세션이 만료되었습니다. 다시 로그인해주세요.");
+}
+
 // 과거 기록 조회 기능
 async function showHistory() {
-    if (!currentSession) return;
-    
     const historyModal = document.getElementById('history-modal');
     const historyList = document.getElementById('history-list');
     historyList.innerHTML = "<p>기록을 불러오는 중이옵니다...</p>";
     historyModal.classList.remove('hidden');
 
     try {
+        const accessToken = await getFreshAccessToken({ required: true });
         const response = await fetch('/api/my_roadmaps', {
-            headers: { 'Authorization': `Bearer ${currentSession.access_token}` }
+            headers: { 'Authorization': `Bearer ${accessToken}` }
         });
         const data = await response.json();
+        await throwIfAuthExpired(response, data);
 
         if (data.status === 'success') {
             historyList.innerHTML = "";
@@ -125,7 +173,7 @@ async function showHistory() {
             historyList.innerHTML = "<p>오류: " + data.message + "</p>";
         }
     } catch (error) {
-        historyList.innerHTML = "<p>서버 연결 실패!</p>";
+        historyList.innerHTML = `<p>${escapeHtml(error.message || "서버 연결 실패!")}</p>`;
     }
 }
 
@@ -167,15 +215,17 @@ async function deleteSelectedRoadmaps() {
     if (deleteBtn) deleteBtn.disabled = true;
 
     try {
+        const accessToken = await getFreshAccessToken({ required: true });
         const response = await fetch('/api/delete_roadmaps', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${currentSession.access_token}`
+                'Authorization': `Bearer ${accessToken}`
             },
             body: JSON.stringify({ ids: selectedIds })
         });
         const data = await response.json();
+        await throwIfAuthExpired(response, data);
 
         if (data.status === 'success') {
             const deletedIds = Array.isArray(data.deleted_ids) ? data.deleted_ids : selectedIds;
@@ -197,7 +247,7 @@ async function deleteSelectedRoadmaps() {
             updateHistorySelectionState();
         }
     } catch (error) {
-        alert("서버 연결 실패!");
+        alert(error.message || "서버 연결 실패!");
         updateHistorySelectionState();
     }
 }
@@ -206,11 +256,13 @@ async function deleteSavedRoadmap(roadmapId, btnElement) {
     if (!confirm("정말로 이 기록을 삭제하시겠소? 한 번 지우면 되돌릴 수 없느니라.")) return;
 
     try {
+        const accessToken = await getFreshAccessToken({ required: true });
         const response = await fetch(`/api/delete_roadmap/${roadmapId}`, {
             method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${currentSession.access_token}` }
+            headers: { 'Authorization': `Bearer ${accessToken}` }
         });
         const data = await response.json();
+        await throwIfAuthExpired(response, data);
 
         if (data.status === 'success') {
             alert("기록이 삭제되었느니라.");
@@ -228,7 +280,7 @@ async function deleteSavedRoadmap(roadmapId, btnElement) {
             alert("삭제 실패: " + data.message);
         }
     } catch (error) {
-        alert("서버 연결 실패!");
+        alert(error.message || "서버 연결 실패!");
     }
 }
 
@@ -352,19 +404,16 @@ async function handleUpload() {
 }
 
 async function handleLoadSavedScores() {
-    if (!currentSession) {
-        alert("먼저 로그인해 주시게! 저장된 점수를 불러오려면 계정 확인이 필요하옵니다.");
-        return;
-    }
-
     document.getElementById('typewriter-2').innerText = "예전 기록에서 가장 최근 점수를 찾고 있사옵니다... 잠시만 기다려 주시옵소서.";
     document.getElementById('action-2').classList.add('hidden');
 
     try {
+        const accessToken = await getFreshAccessToken({ required: true });
         const response = await fetch('/api/latest_riasec_scores', {
-            headers: { 'Authorization': `Bearer ${currentSession.access_token}` }
+            headers: { 'Authorization': `Bearer ${accessToken}` }
         });
         const data = await response.json();
+        await throwIfAuthExpired(response, data);
 
         if (data.status === 'success') {
             tempRecommendations = data.recommendations || [];
@@ -376,7 +425,7 @@ async function handleLoadSavedScores() {
             document.getElementById('action-2').classList.remove('hidden');
         }
     } catch (error) {
-        alert("서버 연결 실패!");
+        alert(error.message || "서버 연결 실패!");
         document.getElementById('action-2').classList.remove('hidden');
     }
 }
@@ -595,7 +644,8 @@ async function showRoadmap(answer) {
 
     try {
         const headers = { 'Content-Type': 'application/json' };
-        if (currentSession) { headers['Authorization'] = `Bearer ${currentSession.access_token}`; }
+        const accessToken = await getFreshAccessToken();
+        if (accessToken) { headers['Authorization'] = `Bearer ${accessToken}`; }
 
         const response = await fetch('/api/roadmap', {
             method: 'POST',
@@ -604,6 +654,7 @@ async function showRoadmap(answer) {
         });
 
         const data = await response.json();
+        await throwIfAuthExpired(response, data);
 
         if (data.status === 'success') {
             lastRoadmapText  = data.roadmap;
@@ -806,7 +857,8 @@ async function sendRoadmapChat(promptOverride) {
     try {
         const hasRiasecScores = !!(lastScores && Object.keys(lastScores).length > 0);
         const headers = { 'Content-Type': 'application/json' };
-        if (currentSession) { headers['Authorization'] = `Bearer ${currentSession.access_token}`; }
+        const accessToken = await getFreshAccessToken();
+        if (accessToken) { headers['Authorization'] = `Bearer ${accessToken}`; }
 
         const response = await fetch('/api/roadmap_chat', {
             method: 'POST',
@@ -834,6 +886,7 @@ async function sendRoadmapChat(promptOverride) {
             try {
                 const errorData = await response.json();
                 msg = errorData.message || '';
+                if (response.status === 401) await clearLocalAuthSession();
             } catch {
                 msg = `(HTTP ${response.status})`;
             }

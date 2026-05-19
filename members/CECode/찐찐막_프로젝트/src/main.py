@@ -114,6 +114,9 @@ OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
 
 app = FastAPI()
 
+class AuthSessionError(Exception):
+    pass
+
 @app.get("/healthz")
 async def healthz():
     return {"status": "ok"}
@@ -327,9 +330,15 @@ def get_bearer_token(authorization: Optional[str]):
 
 
 def get_authenticated_user(token):
-    user = supabase_request("/auth/v1/user", token=token)
+    try:
+        user = supabase_request("/auth/v1/user", token=token)
+    except RuntimeError as e:
+        message = str(e)
+        if "session_not_found" in message or "JWT" in message or "403" in message or "401" in message:
+            raise AuthSessionError("로그인 세션이 만료되었습니다. 다시 로그인해주세요.") from e
+        raise
     if not user or not user.get("id"):
-        raise RuntimeError("인증된 사용자 정보를 확인할 수 없습니다.")
+        raise AuthSessionError("인증된 사용자 정보를 확인할 수 없습니다.")
     return user
 
 
@@ -721,6 +730,8 @@ async def latest_riasec_scores(authorization: Optional[str] = Header(default=Non
             "recommendations": recommendations,
             "source_created_at": data[0].get("created_at"),
         }
+    except AuthSessionError as e:
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=401)
     except Exception as e:
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
 
@@ -757,6 +768,8 @@ async def my_roadmaps(authorization: Optional[str] = Header(default=None)):
             token=token,
         )
         return {"status": "success", "data": data or []}
+    except AuthSessionError as e:
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=401)
     except ValueError as e:
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=401)
     except Exception as e:
@@ -784,6 +797,8 @@ async def delete_roadmap(roadmap_id: str, authorization: Optional[str] = Header(
         if not deleted:
             return JSONResponse(content={"status": "error", "message": "삭제할 기록을 찾을 수 없습니다."}, status_code=404)
         return {"status": "success"}
+    except AuthSessionError as e:
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=401)
     except ValueError:
         return JSONResponse(content={"status": "error", "message": "로드맵 ID가 올바르지 않습니다."}, status_code=400)
     except Exception as e:
@@ -825,6 +840,8 @@ async def delete_roadmaps(req: DeleteRoadmapsRequest, authorization: Optional[st
 
         deleted_ids = [item.get("id") for item in deleted if isinstance(item, dict) and item.get("id")]
         return {"status": "success", "deleted_count": len(deleted), "deleted_ids": deleted_ids}
+    except AuthSessionError as e:
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=401)
     except ValueError as e:
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=401)
     except Exception as e:
@@ -978,6 +995,8 @@ async def generate_roadmap(req: RoadmapRequest, authorization: Optional[str] = H
                 except Exception as memory_error:
                     memory_payload["chat_memory_error"] = str(memory_error)
         return {"status": "success", "roadmap": roadmap_text, **memory_payload}
+    except AuthSessionError as e:
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=401)
     except Exception as e:
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
 
@@ -1074,6 +1093,8 @@ async def roadmap_chat(req: RoadmapChatRequest, authorization: Optional[str] = H
             headers["X-Roadmap-Id"] = chat_context["session"]["roadmap_id"]
         
         return StreamingResponse(event_generator(), media_type="text/plain", headers=headers)
+    except AuthSessionError as e:
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=401)
     except PermissionError as e:
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=403)
     except ValueError as e:
