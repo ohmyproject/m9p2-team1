@@ -4,28 +4,104 @@ import re
 import io
 import os
 import json
+import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
 from uuid import UUID
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from dotenv import load_dotenv
+
+import httpx
 from pypdf import PdfReader
 from fastapi import FastAPI, UploadFile, File, Header
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+
+# LangChain 관련 임포트
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnablePassthrough
+from operator import itemgetter
+from supabase import create_client, Client
 
 # .env 파일 로드
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 OPENAI_API_KEY = (os.getenv("OPENAI_API_KEY") or "").strip()
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = (
+OPENAI_MODEL = (os.getenv("OPENAI_MODEL", "gpt-5-mini") or "gpt-5-mini").strip().strip("'\"") or "gpt-5-mini"
+SUPABASE_URL = (os.getenv("SUPABASE_URL") or "").strip()
+SUPABASE_PUBLIC_KEY = (
     os.getenv("SUPABASE_PUBLISHABLE_KEY")
     or os.getenv("SUPABASE_ANON_KEY")
+    or ""
+).strip()
+SUPABASE_SERVER_KEY = (
+    os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    or SUPABASE_PUBLIC_KEY
     or os.getenv("SUPABASE_KEY")
-)
+    or ""
+).strip()
+SUPABASE_KEY = SUPABASE_SERVER_KEY
+
+# --- Lazy initialization (전역 싱글턴) ---
+_supabase_client: Optional[Client] = None
+_embeddings: Optional[OpenAIEmbeddings] = None
+_openai_http_client: Optional[httpx.Client] = None
+_openai_http_async_client: Optional[httpx.AsyncClient] = None
+
+
+def get_openai_timeout() -> httpx.Timeout:
+    return httpx.Timeout(120.0, connect=20.0, read=120.0, write=30.0, pool=30.0)
+
+
+def get_openai_http_client() -> httpx.Client:
+    global _openai_http_client
+    if _openai_http_client is None:
+        _openai_http_client = httpx.Client(
+            timeout=get_openai_timeout(),
+            trust_env=False,
+            follow_redirects=True,
+        )
+    return _openai_http_client
+
+
+def get_openai_http_async_client() -> httpx.AsyncClient:
+    global _openai_http_async_client
+    if _openai_http_async_client is None:
+        _openai_http_async_client = httpx.AsyncClient(
+            timeout=get_openai_timeout(),
+            trust_env=False,
+            follow_redirects=True,
+        )
+    return _openai_http_async_client
+
+
+def get_supabase_client() -> Client:
+    global _supabase_client
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise RuntimeError("SUPABASE_URL/SUPABASE key environment variables are not configured.")
+    if _supabase_client is None:
+        _supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    return _supabase_client
+
+
+def get_embeddings() -> OpenAIEmbeddings:
+    global _embeddings
+    if not OPENAI_API_KEY:
+        raise RuntimeError("OPENAI_API_KEY environment variable is not configured.")
+    if _embeddings is None:
+        _embeddings = OpenAIEmbeddings(
+            model="text-embedding-3-small",
+            api_key=OPENAI_API_KEY,
+            timeout=get_openai_timeout(),
+            max_retries=3,
+            http_client=get_openai_http_client(),
+            http_async_client=get_openai_http_async_client(),
+        )
+    return _embeddings
 
 JK_JOB_SELECT = (
     "id,JK_L_category,JK_M_category,top3,"
@@ -33,10 +109,135 @@ JK_JOB_SELECT = (
     "enterprising_score,conventional_score,major_required,job_information"
 )
 USER_ROADMAP_SELECT = "id,job_name,riasec_scores,roadmap_text,job_information,created_at"
+RIASEC_LABELS = ["현실형", "탐구형", "예술형", "사회형", "진취형", "관습형"]
 OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
 
 app = FastAPI()
 
+@app.get("/healthz")
+async def healthz():
+    return {"status": "ok"}
+
+# --- 모델 정의 ---
+class RoadmapRequest(BaseModel):
+    job_name: str
+    is_major_required: bool
+    user_major_status: str
+    riasec_scores: Optional[dict] = None
+    job_information: Optional[str] = None
+
+class RoadmapChatRequest(BaseModel):
+    message: str
+    messages: Optional[List[Dict[str, str]]] = []
+    roadmap_id: Optional[str] = None
+    thread_id: Optional[str] = None
+    session_id: Optional[str] = None
+    job_name: Optional[str] = ""
+    job_information: Optional[str] = ""
+    riasec_scores: Optional[Dict[str, Any]] = None
+    roadmap_text: Optional[str] = ""
+    recommendations: Optional[List[Dict[str, Any]]] = []
+    has_riasec_scores: Optional[bool] = None
+    score_context_note: Optional[str] = None
+    user_major_status: Optional[str] = None
+
+class DeleteRoadmapsRequest(BaseModel):
+    ids: list[str]
+
+# --- LangChain RAG 로직 ---
+
+def custom_search_jobs(query: str, k: int = 3):
+    """라이브러리 호환성 문제를 피해 직접 벡터 검색을 수행하는 함수"""
+    try:
+        # 1. 질문을 벡터로 변환
+        query_vector = get_embeddings().embed_query(query)
+        
+        # 2. Supabase match_jobs RPC 호출
+        res = get_supabase_client().rpc("match_jobs", {
+            "query_embedding": query_vector,
+            "match_threshold": 0.5,
+            "match_count": k
+        }).execute()
+        
+        # 3. 결과 포맷팅
+        docs = res.data or []
+        return "\n\n".join([f"직무명: {doc.get('JK_M_category')}\n내용: {doc.get('job_information')}" for doc in docs])
+    except Exception as e:
+        print(f"RAG search error ({type(e).__name__}): {e}", flush=True)
+        traceback.print_exc()
+        print(f"검색 중 오류 발생: {e}")
+        return "관련 직무 지식을 찾을 수 없습니다."
+
+def get_rag_chain():
+    if not OPENAI_API_KEY:
+        raise RuntimeError("OPENAI_API_KEY environment variable is not configured.")
+
+    llm_kwargs = {
+        "model": OPENAI_MODEL,
+        "api_key": OPENAI_API_KEY,
+        "timeout": get_openai_timeout(),
+        "max_retries": 3,
+        "streaming": True,
+        "stream_usage": False,
+        "http_client": get_openai_http_client(),
+        "http_async_client": get_openai_http_async_client(),
+        "use_responses_api": False,
+    }
+    if not OPENAI_MODEL.startswith("gpt-5"):
+        llm_kwargs["temperature"] = 0.7
+    llm = ChatOpenAI(**llm_kwargs)
+    
+    template = """
+당신은 '노비 JOB아라'의 직무 탐색 도우미 챗봇 '탐봇'입니다.
+사용자가 추천받은 직무와 로드맵을 확인한 뒤, "이게 진짜 나한테 맞나?"를 검증하는 단계에서 등장합니다.
+사용자의 기질(RIASEC)과 관아의 기록고(검색된 지식)를 바탕으로 조언하십시오.
+
+[역할]
+1. 직무 적합성 검증:사용자의 RIASEC 흥미 유형과 선택 직무가 실제로 잘 맞는지 분석하고, 장단점과 비전공자 진입 현실을 솔직하게 안내합니다.
+2. 대안 직무 탐색: 선택 직무와 유사하거나 진입 장벽이 낮은 대안 직무를 비교하여 제안합니다. 추천 직무 목록을 우선 활용하세요.
+
+[답변 제한]
+- 사용자가 묻지 않은 역할의 내용은 절대 포함하지 마세요. 예시: 대안 직무를 물었으면 대안 직무만을 답하세요. "추가로 자격증도 알려드리면…" 같은 자발적 확장 금지.
+- 자소서·이력서 작성 대행, 합격 보장·취업 성공 예측, 연봉 협상·면접 코칭 등은 범위 밖임을 안내하고, 직무 탐색 및 자격증 관련 질문으로 유도하세요.
+- 날씨, 연예, 게임, 정치 논쟁, 의료/법률 판단 등 서비스 목적 밖 질문은 짧게 거절한 뒤 직무 상담으로 유도하세요.
+- RIASEC 점수가 없으면 흥미점수 기반 판단은 할 수 없다고 먼저 밝히고, 선택 직무와 로드맵 기준으로만 상담하세요.
+
+[말투]
+친근하고 현실적인 한국어 일상 존댓말. 딱딱하지 않되 전문성은 유지하세요.
+
+[포맷]
+- 답변은 2~4개의 짧은 문단 또는 목록으로 나누고 문단 사이에 줄바꿈을 넣으세요.
+- 답변을 한 문단에 몰아쓰지 마세요.
+
+[사용자 기질 정보]
+{user_context}
+
+[관아의 기록고 (참고 지식)]
+{context}
+
+[이전 대화 기록]
+{chat_history}
+
+질문: {input}
+탐봇의 조언:"""
+
+    prompt = ChatPromptTemplate.from_template(template)
+    
+    # 체인 구성: 검색 로직을 custom_search_jobs로 교체
+    chain = (
+        {
+            "context": lambda x: custom_search_jobs(x["input"]),
+            "input": itemgetter("input"),
+            "user_context": itemgetter("user_context"),
+            "chat_history": itemgetter("chat_history")
+        }
+        | prompt
+        | llm
+        | StrOutputParser()
+    )
+    return chain
+
+# --- 헬퍼 함수들 ---
 def supabase_request(path, method="GET", params=None, body=None, token=None, prefer=None):
     if not SUPABASE_URL or not SUPABASE_KEY:
         raise RuntimeError("Supabase 환경 변수가 설정되지 않았습니다.")
@@ -74,15 +275,17 @@ def supabase_request(path, method="GET", params=None, body=None, token=None, pre
         raise RuntimeError(f"Supabase 요청 실패 ({e.code}): {detail}") from e
 
 
-def openai_chat_completion(messages, temperature=0.7, model="gpt-4o-mini"):
+def openai_chat_completion(messages, temperature=0.7, model=None):
     if not OPENAI_API_KEY:
         raise RuntimeError("OPENAI_API_KEY 환경 변수가 설정되지 않았습니다.")
 
+    selected_model = model or OPENAI_MODEL
     payload = {
-        "model": model,
+        "model": selected_model,
         "messages": messages,
-        "temperature": temperature,
     }
+    if temperature is not None and not selected_model.startswith("gpt-5"):
+        payload["temperature"] = temperature
     request = urllib.request.Request(
         OPENAI_CHAT_COMPLETIONS_URL,
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
@@ -171,6 +374,200 @@ def save_user_roadmap(token, user_id, job_name, riasec_scores, roadmap_text, job
         prefer="return=representation",
     )
 
+
+def normalize_uuid(value, field_name="id"):
+    if not value:
+        return None
+    try:
+        return str(UUID(str(value)))
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"{field_name} is not a valid UUID.") from e
+
+
+def first_row(rows):
+    return rows[0] if isinstance(rows, list) and rows else None
+
+
+def get_user_roadmap(token, user_id, roadmap_id):
+    roadmap_uuid = normalize_uuid(roadmap_id, "roadmap_id")
+    rows = supabase_request(
+        "/rest/v1/user_roadmaps",
+        params={
+            "select": USER_ROADMAP_SELECT,
+            "id": f"eq.{roadmap_uuid}",
+            "user_id": f"eq.{user_id}",
+            "limit": "1",
+        },
+        token=token,
+    )
+    row = first_row(rows)
+    if not row:
+        raise PermissionError("Roadmap not found or not owned by this user.")
+    return row
+
+
+def upsert_chat_thread(token, user_id, job_name):
+    payload = {
+        "user_id": user_id,
+        "job_name": job_name or "",
+        "scope": "job",
+    }
+    rows = supabase_request(
+        "/rest/v1/chat_threads",
+        method="POST",
+        params={"on_conflict": "user_id,job_name,scope"},
+        body=payload,
+        token=token,
+        prefer="resolution=merge-duplicates,return=representation",
+    )
+    row = first_row(rows)
+    if not row:
+        raise RuntimeError("Failed to create chat thread.")
+    return row
+
+
+def upsert_chat_session(token, thread_id, roadmap_id, roadmap_text=None):
+    payload = {
+        "thread_id": normalize_uuid(thread_id, "thread_id"),
+        "roadmap_id": normalize_uuid(roadmap_id, "roadmap_id"),
+        "roadmap_text": roadmap_text or "",
+    }
+    rows = supabase_request(
+        "/rest/v1/chat_sessions",
+        method="POST",
+        params={"on_conflict": "thread_id,roadmap_id"},
+        body=payload,
+        token=token,
+        prefer="resolution=merge-duplicates,return=representation",
+    )
+    row = first_row(rows)
+    if not row:
+        raise RuntimeError("Failed to create chat session.")
+    return row
+
+
+def get_owned_chat_thread(token, user_id, thread_id):
+    thread_uuid = normalize_uuid(thread_id, "thread_id")
+    rows = supabase_request(
+        "/rest/v1/chat_threads",
+        params={
+            "select": "id,user_id,job_name,scope,created_at,updated_at",
+            "id": f"eq.{thread_uuid}",
+            "user_id": f"eq.{user_id}",
+            "limit": "1",
+        },
+        token=token,
+    )
+    row = first_row(rows)
+    if not row:
+        raise PermissionError("Chat thread not found or not owned by this user.")
+    return row
+
+
+def get_chat_session_context(token, user_id, session_id, roadmap_id=None, thread_id=None):
+    session_uuid = normalize_uuid(session_id, "session_id")
+    params = {
+        "select": "id,thread_id,roadmap_id,roadmap_text,created_at,updated_at",
+        "id": f"eq.{session_uuid}",
+        "limit": "1",
+    }
+    if roadmap_id:
+        params["roadmap_id"] = f"eq.{normalize_uuid(roadmap_id, 'roadmap_id')}"
+    if thread_id:
+        params["thread_id"] = f"eq.{normalize_uuid(thread_id, 'thread_id')}"
+
+    rows = supabase_request(
+        "/rest/v1/chat_sessions",
+        params=params,
+        token=token,
+    )
+    session = first_row(rows)
+    if not session:
+        raise PermissionError("Chat session not found or not owned by this user.")
+
+    thread = get_owned_chat_thread(token, user_id, session["thread_id"])
+    return {"thread": thread, "session": session}
+
+
+def ensure_chat_session_for_roadmap(token, user_id, roadmap_id, fallback_job_name=None, fallback_roadmap_text=None):
+    roadmap = get_user_roadmap(token, user_id, roadmap_id)
+    job_name = roadmap.get("job_name") or fallback_job_name or ""
+    roadmap_text = roadmap.get("roadmap_text") or fallback_roadmap_text or ""
+    thread = upsert_chat_thread(token, user_id, job_name)
+    session = upsert_chat_session(token, thread["id"], roadmap["id"], roadmap_text)
+    return {"thread": thread, "session": session, "roadmap": roadmap}
+
+
+def load_chat_messages(token, thread_id, session_id, limit=8):
+    rows = supabase_request(
+        "/rest/v1/chat_messages",
+        params={
+            "select": "id,role,content,citations,created_at",
+            "thread_id": f"eq.{normalize_uuid(thread_id, 'thread_id')}",
+            "session_id": f"eq.{normalize_uuid(session_id, 'session_id')}",
+            "order": "created_at.desc",
+            "limit": str(limit),
+        },
+        token=token,
+    )
+    return list(reversed(rows or []))
+
+
+def save_chat_message(token, thread_id, session_id, role, content, citations=None):
+    payload = {
+        "thread_id": normalize_uuid(thread_id, "thread_id"),
+        "session_id": normalize_uuid(session_id, "session_id"),
+        "role": role,
+        "content": content,
+        "citations": citations or [],
+    }
+    return supabase_request(
+        "/rest/v1/chat_messages",
+        method="POST",
+        body=payload,
+        token=token,
+        prefer="return=minimal",
+    )
+
+
+def format_chat_history(messages):
+    lines = []
+    for message in messages or []:
+        role = message.get("role")
+        content = (message.get("content") or "").strip()
+        if role in ("user", "assistant", "system") and content:
+            label = "나" if role == "user" else "대감" if role == "assistant" else "system"
+            lines.append(f"{label}: {content}")
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
+def normalize_riasec_scores(scores):
+    if isinstance(scores, str):
+        try:
+            scores = json.loads(scores)
+        except json.JSONDecodeError as e:
+            raise ValueError("저장된 RIASEC 점수 형식이 올바르지 않습니다.") from e
+
+    if not isinstance(scores, dict) or not scores:
+        raise ValueError("저장된 RIASEC 점수가 비어 있습니다.")
+
+    normalized = {}
+    for label in RIASEC_LABELS:
+        values = scores.get(label)
+        if not isinstance(values, dict):
+            raise ValueError("저장된 RIASEC 점수에 필요한 흥미 유형이 없습니다.")
+
+        try:
+            raw_score = int(values["원점수"])
+            standard_score = int(values["표준점수"])
+        except (KeyError, TypeError, ValueError) as e:
+            raise ValueError("저장된 RIASEC 점수 값이 올바르지 않습니다.") from e
+
+        normalized[label] = {"원점수": raw_score, "표준점수": standard_score}
+
+    return normalized
+
+
 # --- 핵심 로직 함수들 (기존 코드 재사용) ---
 def extract_scores_from_pdf(pdf_bytes):
     reader = PdfReader(io.BytesIO(pdf_bytes))
@@ -187,8 +584,7 @@ def extract_scores_from_pdf(pdf_bytes):
 
     raw_scores = list(map(int, m.group(1).split()))
     std_scores = list(map(int, m.group(2).split()))
-    labels = ["현실형", "탐구형", "예술형", "사회형", "진취형", "관습형"]
-    return {label: {"원점수": raw, "표준점수": std} for label, raw, std in zip(labels, raw_scores, std_scores)}
+    return {label: {"원점수": raw, "표준점수": std} for label, raw, std in zip(RIASEC_LABELS, raw_scores, std_scores)}
 
 def recommend_jobs_for_user_profile(user_scores, df_data):
     if df_data.empty:
@@ -241,18 +637,10 @@ def recommend_jobs_for_user_profile(user_scores, df_data):
     result["최종유사도"] = final_score
     result = result.sort_values(by=["최종유사도"], ascending=False).reset_index(drop=True)
     
-    # 상위 10개 추출 후 JSON 변환 가능한 딕셔너리로 변경
-    top10 = result.head(10)
-    return top10[["JK중분류", "직무정보", "전공필수", "최종유사도"]].to_dict(orient="records")
+    # 전체 결과 반환 (JK대분류 포함) — 프론트에서 top10/대분류 필터링 처리
+    return result[["JK대분류", "JK중분류", "직무정보", "전공필수", "최종유사도"]].to_dict(orient="records")
 
 # --- API 엔드포인트 ---
-
-class RoadmapRequest(BaseModel):
-    job_name: str
-    is_major_required: bool
-    user_major_status: str
-    riasec_scores: Optional[dict] = None
-    job_information: Optional[str] = None
 
 @app.get("/", response_class=HTMLResponse)
 async def read_index():
@@ -262,7 +650,7 @@ async def read_index():
 
 @app.get("/api/supabase_config")
 async def supabase_config():
-    if not SUPABASE_URL or not SUPABASE_KEY:
+    if not SUPABASE_URL or not SUPABASE_PUBLIC_KEY:
         return JSONResponse(
             content={"status": "error", "message": "Supabase 설정이 없습니다."},
             status_code=500,
@@ -270,7 +658,7 @@ async def supabase_config():
     return {
         "status": "success",
         "url": SUPABASE_URL,
-        "publishable_key": SUPABASE_KEY,
+        "publishable_key": SUPABASE_PUBLIC_KEY,
     }
 
 @app.post("/api/upload_pdf")
@@ -289,6 +677,52 @@ async def upload_pdf(file: UploadFile = File(...)):
         })
     except Exception as e:
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=400)
+
+@app.get("/api/latest_riasec_scores")
+async def latest_riasec_scores(authorization: Optional[str] = Header(default=None)):
+    try:
+        try:
+            token = get_bearer_token(authorization)
+        except ValueError as e:
+            return JSONResponse(content={"status": "error", "message": str(e)}, status_code=401)
+
+        if not token:
+            return JSONResponse(content={"status": "error", "message": "로그인이 필요합니다."}, status_code=401)
+
+        user = get_authenticated_user(token)
+        data = supabase_request(
+            "/rest/v1/user_roadmaps",
+            params={
+                "select": "id,riasec_scores,created_at",
+                "user_id": f"eq.{user['id']}",
+                "riasec_scores": "not.is.null",
+                "order": "created_at.desc",
+                "limit": "1",
+            },
+            token=token,
+        )
+        if not data:
+            return JSONResponse(
+                content={"status": "error", "message": "불러올 수 있는 저장된 점수가 없습니다."},
+                status_code=404,
+            )
+
+        try:
+            scores = normalize_riasec_scores(data[0].get("riasec_scores"))
+        except ValueError as e:
+            return JSONResponse(content={"status": "error", "message": str(e)}, status_code=404)
+
+        jobs_df = load_job_dataframe()
+        recommendations = recommend_jobs_for_user_profile(scores, jobs_df)
+
+        return {
+            "status": "success",
+            "scores": scores,
+            "recommendations": recommendations,
+            "source_created_at": data[0].get("created_at"),
+        }
+    except Exception as e:
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
 
 @app.get("/api/search_job")
 async def search_job(query: str):
@@ -355,6 +789,48 @@ async def delete_roadmap(roadmap_id: str, authorization: Optional[str] = Header(
     except Exception as e:
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
 
+
+@app.post("/api/delete_roadmaps")
+async def delete_roadmaps(req: DeleteRoadmapsRequest, authorization: Optional[str] = Header(default=None)):
+    try:
+        token = get_bearer_token(authorization)
+        if not token:
+            return JSONResponse(content={"status": "error", "message": "로그인이 필요합니다."}, status_code=401)
+
+        if not req.ids:
+            return JSONResponse(content={"status": "error", "message": "삭제할 기록을 선택해주세요."}, status_code=400)
+
+        roadmap_ids = []
+        for roadmap_id in req.ids:
+            try:
+                roadmap_uuid = str(UUID(str(roadmap_id)))
+            except (TypeError, ValueError):
+                return JSONResponse(content={"status": "error", "message": "로드맵 ID가 올바르지 않습니다."}, status_code=400)
+            if roadmap_uuid not in roadmap_ids:
+                roadmap_ids.append(roadmap_uuid)
+
+        user = get_authenticated_user(token)
+        deleted = supabase_request(
+            "/rest/v1/user_roadmaps",
+            method="DELETE",
+            params={
+                "id": f"in.({','.join(roadmap_ids)})",
+                "user_id": f"eq.{user['id']}",
+            },
+            token=token,
+            prefer="return=representation",
+        )
+        if not deleted:
+            return JSONResponse(content={"status": "error", "message": "삭제할 기록을 찾을 수 없습니다."}, status_code=404)
+
+        deleted_ids = [item.get("id") for item in deleted if isinstance(item, dict) and item.get("id")]
+        return {"status": "success", "deleted_count": len(deleted), "deleted_ids": deleted_ids}
+    except ValueError as e:
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=401)
+    except Exception as e:
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
+
+
 @app.post("/api/roadmap")
 async def generate_roadmap(req: RoadmapRequest, authorization: Optional[str] = Header(default=None)):
     """선택한 직무와 전공 여부를 바탕으로 AI 로드맵을 생성하는 API"""
@@ -364,7 +840,7 @@ async def generate_roadmap(req: RoadmapRequest, authorization: Optional[str] = H
     except ValueError as e:
         token = None
     
-    # (이하 사용자님이 작성하신 프롬프트 분기 로직과 동일하게 유지)
+    # (프롬프트 분기 로직)
     if req.is_major_required:
         if not is_user_major:
             sys_role = "당신은 특정 직무에 진입하기 위해 반드시 학위가 필요한 경우, 현실적인 진입 경로를 안내하는 커리어 코치입니다."
@@ -392,80 +868,32 @@ async def generate_roadmap(req: RoadmapRequest, authorization: Optional[str] = H
 - 왜 학위가 필요한지 쉽게 설명
 - 각 단계마다 실행 가능한 결과물 포함
 - 각 단계 끝에 “💡 현실적 Tip” 포함
-- 전체 분량: 700~900자""" # (여기에 기존 프롬프트 텍스트 삽입)
+- 전체 분량: 700~900자"""
         else:
-            sys_role = "당신은 특정 직무에 진입하기 위해 반드시 필요한 학위를 이미 이수했지만..."
+            sys_role = "당신은 특정 직무에 진입하기 위해 반드시 필요한 학위를 이미 이수했지만 실무 경험이 부족한 이들을 위한 커리어 코치입니다."
             user_context = f"- 선택한 직무: {req.job_name}\n- 전공 여부: 필수 전공 이수"
             out_inst = f"""
 1. 3단계 실행 구조:
 
 ■ 1단계: 필수 라이선스(면허/자격) 획득 및 현장 감각 깨우기
-
-해당 직무 진입에 필수적인 국가고시 또는 필수 면허 취득 전략 제시
-
-반드시 필요한 국가 자격증, 면허, 시험 명칭을 구체적으로 포함
-
-선배 실무자의 브이로그, 현직자 인터뷰를 통해 학교와 현장의 차이점 파악
-
-실무에서 실제로 자주 마주치는 상황(야간근무, 고객 응대, 서류 작성, 현장 변수 등)까지 함께 안내
-
-📌 결과물: 자격/면허 시험 합격을 위한 ‘과목별 핵심 요약 노트’ 또는 ‘스터디 플랜’
-
-💡 현실적 Tip:
-시험 합격만을 목표로 하지 말고, “실제로 이 일을 하게 되면 어떤 하루를 보내는가”를 함께 파악해야 중도 포기를 줄일 수 있음
+- 해당 직무 진입에 필수적인 국가고시 또는 필수 면허 취득 전략 제시
+- 선배 실무자의 브이로그, 현직자 인터뷰를 통해 학교와 현장의 차이점 파악
+- 📌 결과물: 자격/면허 시험 합격을 위한 ‘과목별 핵심 요약 노트’ 또는 ‘스터디 플랜’
 
 ■ 2단계: 필수 수습/실습 파악 및 실무 도구 점검
-
-직무에 따라 요구되는 법정 수습 기간, 인턴십, 실무 연수 과정 등 안내
-
-실무에서 당장 쓰이는 전문 프로그램, 장비, 행정 서식 등의 기초 파악
-
-채용공고에서 반복적으로 등장하는 실무 역량 2~3개를 반드시 추출하여 제시
-
-각 역량별로 고용24 심화/특화 과정, 실습, 스터디 등 현실적인 학습 방법 연결
-
-📌 결과물: 실무에 투입되었을 때 당황하지 않기 위한 나만의 ‘업무 매뉴얼(체크리스트) 초안’
-
-💡 현실적 Tip:
-실무는 “얼마나 많이 아는가”보다 “바로 투입 가능한가”가 중요하므로, 반복되는 업무 흐름을 먼저 익히는 것이 효과적임
+- 직무에 따라 요구되는 법정 수습 기간, 인턴십, 실무 연수 과정 등 안내
+- 채용공고에서 반복적으로 등장하는 실무 역량 2~3개를 반드시 추출하여 제시
+- 📌 결과물: 실무에 투입되었을 때 당황하지 않기 위한 나만의 ‘업무 매뉴얼(체크리스트) 초안’
 
 ■ 3단계: 실전 구직 및 전문성 증명
-
-고용24 또는 해당 직무에 특화된 채용 플랫폼(예: 메디잡, 건설워커 등) 활용법 안내
-
-단순 전공 지식을 넘어 실습/수련 경험을 녹여내는 이력서/자기소개서 작성 가이드
-
-채용담당자가 바로 이해할 수 있는 형태의 전문성 증명 자료 제시
-
-예:
-
-* 임상 케이스 정리
-* 실습 기록 요약
-* 프로젝트 리포트
-* 시공 참여 내역
-* 판례 분석 보고서
-* 연구/실험 정리 자료
-
-중 해당 직무에 가장 적합한 방식으로 추천
-
-📌 결과물: 학과 시절의 실습/프로젝트 경험이 구체적으로 담긴 ‘직무기술서(또는 포트폴리오)’ 1개 제시
-
-💡 현실적 Tip:
-“무엇을 배웠는가”보다 “실제로 어떤 문제를 해결했는가”를 보여주는 방식이 채용에서 훨씬 강하게 작용함
+- 고용24 또는 해당 직무에 특화된 채용 플랫폼 활용법 안내
+- 단순 전공 지식을 넘어 실습/수련 경험을 녹여내는 이력서 작성 가이드
+- 📌 결과물: 학과 시절의 실습/프로젝트 경험이 담긴 ‘직무기술서(또는 포트폴리오)’ 1개 제시
 
 2. 작성 규칙:
-
-{req.job_name}에 맞는 구체적인 면허/국가 자격증 명칭 반드시 포함
-
-이론(학교)과 실무(현장)의 차이를 좁혀주는 구체적인 팁 제공
-
-각 단계마다 반드시 실행 가능한 결과물 포함
-
-각 단계 끝에 반드시 “💡 현실적 Tip” 포함
-
-답변은 초보자가 바로 행동할 수 있도록 현실적이고 구체적으로 작성
-
-전체 분량: 700~900자 내외"""
+- {req.job_name}에 맞는 구체적인 면허/국가 자격증 명칭 반드시 포함
+- 각 단계 끝에 “💡 현실적 Tip” 포함
+- 전체 분량: 700~900자 내외"""
     else:
         if not is_user_major:
             sys_role = "당신은 비전공자로 해당 분야를 처음 접하는 초보자를 위한 전문 커리어 코치입니다."
@@ -481,7 +909,6 @@ async def generate_roadmap(req: RoadmapRequest, authorization: Optional[str] = H
 ■ 2단계: 도구 맛보기 및 행정 준비  
 - 반드시 해당 직무에 맞는 도구/기술만 제시 (일반적인 SQL, 엑셀 반복 금지)  
 - 고용24(hrd.go.kr) ‘내일배움카드’ 안내 포함  
-- 📌 필요 역량 2~3개 + 각각의 학습 방법(강의/훈련) 연결  
 - 📌 결과물: 간단한 실습 결과물 제시  
 
 ■ 3단계: 전문 교육 환경 진입  
@@ -492,9 +919,7 @@ async def generate_roadmap(req: RoadmapRequest, authorization: Optional[str] = H
 2. 작성 규칙:
 - 초등학생도 이해할 수 있는 쉬운 표현 사용
 - 각 단계 끝에 반드시 “💡 현실적 Tip” 추가
-- {req.job_name}에 맞는 구체적인 예시 필수 (일반화 금지)
-- ‘전향’일 경우 기존 경험을 연결하는 문장 1개 포함
-- 마지막 응원 문구나 맺음말(예: "이 3단계를 따라가다보면...")은 절대 작성하지 마십시오. 오직 로드맵 본문으로만 마무리하십시오.
+- 마지막 응원 문구는 생략하고 로드맵 본문으로만 마무리하십시오.
 - 전체 분량: 600~800자 내외"""
         else:
             sys_role = "당신은 관련 전공을 졸업했지만 실무 경험이 없는 초보자를 위한 커리어 코치입니다."
@@ -510,19 +935,16 @@ async def generate_roadmap(req: RoadmapRequest, authorization: Optional[str] = H
 ■ 2단계: 실무 도구 점검 및 행정 준비  
 - 직무 필수 도구/소프트웨어 구체적으로 제시  
 - 고용24 ‘내일배움카드’ 안내  
-- 📌 필요 역량 2~3개 + 학습 방법 연결  
 - 📌 결과물: 실무 툴 활용 결과물  
 
 ■ 3단계: 실전 역량 증명 및 심화  
 - NCS 기반 부족 역량 점검  
 - 고용24 교육 검색 키워드 제시  
-- 직무 맞춤 자격증 제시  
 - 📌 결과물: 취업용 포트폴리오 1개 구체적으로 제시  
 
 2. 작성 규칙:
 - 반드시 {req.job_name} 맞춤 예시 사용
 - 전공 용어와 실무 용어를 연결 설명
-- 각 단계마다 결과물 포함
 - 각 단계 끝에 “💡 현실적 Tip” 포함
 - 전체 분량: 700~900자"""
 
@@ -536,10 +958,126 @@ async def generate_roadmap(req: RoadmapRequest, authorization: Optional[str] = H
             ],
             temperature=0.7
         )
+        memory_payload = {}
         if token:
             user = get_authenticated_user(token)
-            save_user_roadmap(token, user["id"], req.job_name, req.riasec_scores, roadmap_text, req.job_information)
-        return {"status": "success", "roadmap": roadmap_text}
+            saved_rows = save_user_roadmap(token, user["id"], req.job_name, req.riasec_scores, roadmap_text, req.job_information)
+            saved_roadmap = first_row(saved_rows)
+            if saved_roadmap and saved_roadmap.get("id"):
+                memory_payload["roadmap_id"] = saved_roadmap["id"]
+                try:
+                    chat_context = ensure_chat_session_for_roadmap(
+                        token,
+                        user["id"],
+                        saved_roadmap["id"],
+                        fallback_job_name=req.job_name,
+                        fallback_roadmap_text=roadmap_text,
+                    )
+                    memory_payload["thread_id"] = chat_context["thread"]["id"]
+                    memory_payload["session_id"] = chat_context["session"]["id"]
+                except Exception as memory_error:
+                    memory_payload["chat_memory_error"] = str(memory_error)
+        return {"status": "success", "roadmap": roadmap_text, **memory_payload}
+    except Exception as e:
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
+
+
+@app.post("/api/roadmap_chat")
+async def roadmap_chat(req: RoadmapChatRequest, authorization: Optional[str] = Header(default=None)):
+    if not req.message or not req.message.strip():
+        return JSONResponse(content={"status": "error", "message": "질문을 입력해주세요."}, status_code=400)
+
+    try:
+        try:
+            token = get_bearer_token(authorization)
+        except ValueError as e:
+            return JSONResponse(content={"status": "error", "message": str(e)}, status_code=401)
+
+        chat_context = None
+        history_messages = None
+        if token and (req.session_id or req.roadmap_id):
+            user = get_authenticated_user(token)
+            if req.session_id:
+                chat_context = get_chat_session_context(
+                    token,
+                    user["id"],
+                    req.session_id,
+                    roadmap_id=req.roadmap_id,
+                    thread_id=req.thread_id,
+                )
+            else:
+                chat_context = ensure_chat_session_for_roadmap(
+                    token,
+                    user["id"],
+                    req.roadmap_id,
+                    fallback_job_name=req.job_name,
+                    fallback_roadmap_text=req.roadmap_text,
+                )
+            history_messages = load_chat_messages(
+                token,
+                chat_context["thread"]["id"],
+                chat_context["session"]["id"],
+                limit=8,
+            )
+
+        if history_messages is None:
+            history_messages = list(req.messages or [])
+            if history_messages:
+                last_message = history_messages[-1]
+                if (
+                    last_message.get("role") == "user"
+                    and (last_message.get("content") or "").strip() == req.message.strip()
+                ):
+                    history_messages = history_messages[:-1]
+            history_messages = history_messages[-6:]
+
+        chain = get_rag_chain()
+        history_str = format_chat_history(history_messages)
+
+        user_context = f"- 현재 선택 직무: {req.job_name}\n"
+        if req.riasec_scores:
+            user_context += f"- RIASEC 점수: {json.dumps(req.riasec_scores, ensure_ascii=False)}\n"
+        if req.roadmap_text:
+            user_context += f"- 생성된 로드맵 요약: {req.roadmap_text[:200]}..."
+
+        async def event_generator():
+            full_result = []
+            try:
+                async for chunk in chain.astream({
+                    "input": req.message,
+                    "user_context": user_context,
+                    "chat_history": history_str
+                }):
+                    full_result.append(chunk)
+                    yield chunk  # 청크를 클라이언트에 즉시 전송
+        
+            except Exception as e:
+                print(f"Roadmap chat stream error ({type(e).__name__}): {e}", flush=True)
+                traceback.print_exc()
+                yield f"\n[오류 발생]: {str(e)}"
+                return
+        
+            # 스트리밍 완료 후 메모리 저장
+            result = "".join(full_result)
+            if token and chat_context:
+                try:
+                    save_chat_message(token, chat_context["thread"]["id"], chat_context["session"]["id"], "user", req.message)
+                    save_chat_message(token, chat_context["thread"]["id"], chat_context["session"]["id"], "assistant", result, [])
+                except Exception as e:
+                    pass  # 로깅 처리 권장
+                
+        # 메타데이터는 헤더로 전달
+        headers = {}
+        if chat_context:
+            headers["X-Thread-Id"] = chat_context["thread"]["id"]
+            headers["X-Session-Id"] = chat_context["session"]["id"]
+            headers["X-Roadmap-Id"] = chat_context["session"]["roadmap_id"]
+        
+        return StreamingResponse(event_generator(), media_type="text/plain", headers=headers)
+    except PermissionError as e:
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=403)
+    except ValueError as e:
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=400)
     except Exception as e:
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
 
