@@ -122,9 +122,7 @@
   -> Supabase에 로드맵 및 채팅 세션 저장
   -> LangChain RAG 챗봇으로 추가 상담
 ```
-```
-이미지 넣을 구간
-```
+![동작구조](https://github.com/ohmyproject/m9p2-team1/blob/main/integrated/README_image/%EB%8F%99%EC%9E%91%EA%B5%AC%EC%A1%B0.png)
 
 RAG 챗봇은 사용자의 질문을 임베딩한 뒤 Supabase의 `match_jobs` RPC를 호출해 `JK_job` 테이블의 직무 데이터를 검색합니다. 검색된 직무 정보, 사용자의 RIASEC 점수, 생성된 로드맵, 이전 대화 내용을 프롬프트에 함께 넣어 LangChain 기반 스트리밍 답변을 생성합니다.
 
