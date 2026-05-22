@@ -1,0 +1,1339 @@
+/* 둥근모꼴 웹 폰트 적용 */
+@font-face {
+    font-family: 'DungGeunMo';
+    src: url('https://fastly.jsdelivr.net/gh/projectnoonnu/noonfonts_six@1.2/DungGeunMo.woff') format('woff');
+    font-weight: normal;
+    font-style: normal;
+}
+
+body, html {
+    margin: 0; padding: 0;
+    width: 100%; height: 100%;
+    background-color: #212529;
+    font-family: 'DungGeunMo', sans-serif !important;
+    overflow-x: hidden;
+}
+
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+button,
+input {
+    max-width: 100%;
+}
+
+/* 게임 창 중앙 정렬 및 반응형 기준 */
+#game-container {
+    position: relative;
+    width: min(1600px, 100vw);
+    aspect-ratio: 16 / 9;
+    min-height: min(900px, 100dvh);
+    margin: 0 auto;
+    overflow: hidden;
+    border: 6px solid #fff;
+    background-color: #000; /* 배경 이미지 없을 때 대비 */
+    box-shadow: 0 0 20px rgba(0,0,0,0.8);
+}
+
+.phase {
+    display: none; width: 100%; height: 100%;
+    position: absolute; top: 0; left: 0;
+}
+.phase.active { display: block; }
+
+.phase-back-btn {
+    position: absolute;
+    top: 18px;
+    left: 18px;
+    z-index: 1500;
+}
+
+/* 대화창 설정 */
+.dialogue-container {
+    position: absolute; bottom: 15px;
+    width: 90%; left: 5%;
+}
+.dialogue-box { 
+    height: 220px; /* 기존 160px에서 확대 */
+    font-size: 18px; line-height: 1.6;
+}
+.hidden { display: none !important; }
+
+/* 제목 및 버튼 위치 */
+.game-title {
+    position: absolute; top: 30%; width: 100%;
+    text-align: center; color: #f7d51d;
+    text-shadow: 4px 4px #000; font-size: 4rem;
+}
+/* 클릭 시 생기는 파란색 포커스 테두리 완벽 제거 */
+.start-btn:focus, 
+.start-btn:active {
+    outline: none !important; /* 기본 파란색 외곽선 제거 */
+    border: none !important;  /* 테두리 제거 */
+    box-shadow: none !important; /* 혹시 모를 그림자 효과 제거 */
+    background-color: transparent !important; /* 배경색 투명 유지 */
+}
+.start-btn {
+    background: url('/static/assets/start_btn.png') no-repeat center center;
+    background-size: contain;
+    width: 250px;  /* 이미지 가로 크기 */
+    height: 80px;  /* 이미지 세로 크기 */
+    border: none;
+    color: transparent; /* 기존 글자 숨기기 */
+    cursor: pointer;
+    position: absolute;
+    bottom: 20%;
+    left: 50%;
+    transform: translateX(-50%);
+    outline: none !important;
+    -webkit-tap-highlight-color: transparent; /* 모바일에서 터치 시 번쩍이는 효과 제거 */
+}
+
+/* 방보 (결과) 창 */
+.notice-board {
+    position: absolute; top: 40px; left: 38%;
+    width: 25%; height: 650px;
+    background-color: #f8e5c0; color: #000;
+    overflow-y: auto;
+    /* ⚠️ 중요: 상단 여백을 주어 글자가 잘리지 않게 합니다 */
+    padding-top: 30px !important;
+}
+.job-list-container { margin-top: 15px; }
+
+/* --- 로드맵 화면 레이아웃 (슬라이드 E-book 형식) --- */
+
+.roadmap-container { 
+    bottom: 10px; 
+    height: 95%; 
+    width: 45%; /* 양옆 화살표 공간 확보 */
+    left: 50%;
+}
+
+.roadmap-box { 
+    height: 100%; 
+    position: relative; /* 화살표 버튼의 기준점 */
+    padding: 0 !important; /* 버튼 밖으로 빼기 위해 패딩 제거 */
+    overflow: visible !important;
+}
+
+/* 슬라이드 래퍼 (이 창문을 통해서만 보임) */
+.roadmap-slider-wrapper {
+    height: 100%;
+    width: 100%;
+    overflow: hidden; /* 영역 밖으로 나간 카드를 숨김 */
+    position: relative;
+    border: 4px solid #fff; /* nes-container의 원래 테두리를 여기에 적용 */
+    background-color: #f8e5c0;
+    padding: 20px;
+    box-sizing: border-box;
+}
+
+/* 기차 트랙 역할 (카드들이 가로로 길게 연결됨) */
+.roadmap-scroll { 
+    display: flex;
+    flex-direction: row; /* 가로 배치 핵심! */
+    height: 100%;
+    width: 100%;
+    transition: transform 0.4s ease-in-out; /* 스르륵 넘어가는 애니메이션 */
+    will-change: transform;
+}
+
+/* 각 페이지 (슬라이드 1장) */
+.roadmap-stage-card {
+    flex: 0 0 100%; /* 부모 너비의 정확히 100% 차지 */
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    border: none;
+    box-sizing: border-box;
+    background-color: transparent !important;
+    text-align: left;
+    overflow-y: auto;
+    overflow-x: hidden; /* 가로 스크롤 및 밀림 방지 */
+    padding: 40px;
+}
+
+/* 스크롤바 숨기기 (더 책 같은 느낌을 줌) */
+.roadmap-stage-card::-webkit-scrollbar { display: none; }
+.roadmap-stage-card { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* 텍스트 스타일 */
+.roadmap-stage-card div, 
+.roadmap-stage-card strong {
+    color: #000 !important;
+    font-size: 18px;
+    line-height: 1.7;
+    margin-bottom: 10px;
+}
+.roadmap-stage-card strong { color: #000 !important; }
+.roadmap-stage-card .title { 
+    font-size: 1.5rem !important;
+    font-weight: bold !important; /* 굵게 변경 */
+    margin-bottom: 20px;
+    color: #000 !important;
+    background-color: #f8e5c0 !important;
+}
+
+.roadmap-final-actions {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 18px;
+}
+
+.chatbot-stage-card {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden !important;
+}
+
+.roadmap-chat-intro {
+    font-size: 14px !important;
+    line-height: 1.6 !important;
+    color: #3a2a10 !important;
+    margin-bottom: 10px !important;
+}
+
+.roadmap-chat-suggestions {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 8px;
+    margin-bottom: 10px !important;
+    overflow-x: auto;
+}
+
+.roadmap-chat-suggestions .nes-btn {
+    font-size: 11px !important;
+    padding: 4px 8px !important;
+    white-space: nowrap;
+}
+
+.roadmap-chat-log {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    background: rgba(255, 249, 196, 0.38);
+    border: 2px solid var(--gold-dk);
+    border-radius: 4px;
+    padding: 12px;
+    margin-bottom: 10px !important;
+}
+
+.roadmap-chat-message {
+    max-width: 88%;
+    margin-bottom: 10px !important;
+}
+
+.roadmap-chat-message.is-user {
+    margin-left: auto;
+}
+
+.roadmap-chat-label {
+    font-size: 11px !important;
+    line-height: 1.2 !important;
+    color: #5c3a1e !important;
+    margin-bottom: 4px !important;
+}
+
+.roadmap-chat-body {
+    font-size: 13px !important;
+    line-height: 1.75 !important;
+    color: #212529 !important;
+    background: #fff8dc;
+    border: 2px solid #8b6b3d;
+    border-radius: 4px;
+    padding: 8px 10px;
+    box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.18);
+}
+
+.roadmap-chat-message.is-user .roadmap-chat-body {
+    background: #e6f7ed;
+    border-color: var(--green-jade);
+}
+
+.roadmap-chat-citations {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 8px !important;
+}
+
+.roadmap-chat-citations a {
+    font-size: 11px !important;
+    line-height: 1.35 !important;
+    color: #2e7d32 !important;
+    word-break: break-word;
+}
+
+.roadmap-chat-input-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 0 !important;
+    flex-wrap: nowrap;
+}
+
+.roadmap-chat-input-row .nes-input {
+    min-width: 0;
+    flex: 1;
+}
+
+/* --- 슬라이드 좌우 화살표 버튼 스타일 --- */
+.slide-btn {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    background-color: #f7d51d; 
+    color: #000;
+    border: 4px solid #000;
+    font-size: 24px;
+    font-weight: bold;
+    cursor: pointer;
+    z-index: 100;
+    width: 50px;
+    height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'DungGeunMo', sans-serif;
+    box-shadow: 4px 4px 0 #000;
+}
+.slide-btn:active { box-shadow: 0 0 0 #000; transform: translateY(-48%); }
+.slide-prev { left: -25px; } /* 왼쪽으로 살짝 튀어나오게 */
+.slide-next { right: -25px; } /* 오른쪽으로 살짝 튀어나오게 */
+.slide-btn:disabled { 
+    background-color: #7a7a7a; 
+    cursor: not-allowed; 
+    box-shadow: none;
+    opacity: 0.5;
+}
+
+/* 배경 이미지 공통 설정 */
+.background {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-size: cover;      /* 화면에 꽉 차게 조절 */
+    background-position: center; /* 가운데 정렬 */
+    background-repeat: no-repeat;
+    image-rendering: pixelated;  /* 픽셀 아트의 선명함을 유지 */
+}
+
+/* 배경 이미지 각 단계별 배경 이미지 지정 */
+/* 파일 확장자가 .png라면 .jpg를 .png로 바꿔주세요 */
+.intro-bg { 
+    background-image: url('/static/assets/intro.jpg'); 
+}
+
+.upload-bg { 
+    background-image: url('/static/assets/upload.png'); 
+}
+
+.results-bg { 
+    background-image: url('/static/assets/results.jpg'); 
+}
+
+.major-bg { 
+    background-image: url('/static/assets/major.png'); 
+}
+
+.roadmap-bg { 
+    background-image: url('/static/assets/roadmap.jpg'); 
+}
+
+/* --- RIASEC 흥미 유형 분석 디자인 추가 --- */
+:root {
+  --ink: #212529;
+  --gold: #f7d51d;
+  --gold-dk: #d4a017;
+  --gold-lt: #fff9c4;
+  --parchment-dk: #e0c097;
+  --stone: #857c6b;
+  --green-jade: #4aa52e;
+  --green-lt: #e6f7ed;
+}
+
+/* --- 로드맵 3단 분리 박스 디자인 --- */
+
+/* 1. 본문 박스 (step-detail 스타일 활용) */
+.roadmap-stage-card .roadmap-desc {
+    background: rgba(245, 230, 200, 0.95);
+    border: 2px solid var(--gold);
+    border-radius: 6px;
+    padding: 15px 20px;
+    margin-bottom: 12px;
+    color: var(--ink);
+    font-size: 17px !important;
+    line-height: 1.8;
+}
+
+/* 2. 결과물 박스 (초록색 띠 스타일) */
+.roadmap-stage-card .result-box {
+    background: var(--green-lt);
+    border-left: 5px solid var(--green-jade);
+    border-radius: 0 6px 6px 0;
+    padding: 15px 20px;
+    margin-bottom: 12px;
+    color: #1A5C35;
+    font-size: 17px !important;
+    line-height: 1.8;
+    box-shadow: 2px 2px 5px rgba(0,0,0,0.05);
+}
+
+/* 3. 현실적 Tip 박스 (주황색 띠 스타일) */
+.roadmap-stage-card .tip-box {
+    background: #fff7e6;
+    border-left: 5px solid #EF9F27;
+    border-radius: 0 6px 6px 0;
+    padding: 15px 20px;
+    margin-bottom: 12px;
+    color: #633806;
+    font-size: 17px !important;
+    line-height: 1.8;
+    box-shadow: 2px 2px 5px rgba(0,0,0,0.05);
+}
+
+/* 텍스트 간격 미세 조정 */
+.roadmap-stage-card .result-box br,
+.roadmap-stage-card .tip-box br {
+    display: block;
+    content: "";
+    margin-top: 6px;
+}
+
+/* 제목 스타일 */
+.section-title {
+  font-family: 'DungGeunMo', sans-serif; /* 프로젝트 폰트 사용 */
+  font-size: 18px;
+  color: var(--ink);
+  margin-bottom: 12px;
+  padding-bottom: 6px;
+  border-bottom: 2px solid var(--gold);
+  font-weight: bold;
+}
+/* 그래프 가로 배치 및 요소 스타일 */
+.bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.bar-label { font-size: 14px; color: var(--ink); width: 85px; flex-shrink: 0; font-weight: bold; }
+.bar-track {
+  flex: 1; height: 12px; background: #eee;
+  border-radius: 6px; overflow: hidden;
+  border: 1px solid var(--stone);
+}
+.bar-fill {
+  height: 100%; background: linear-gradient(90deg, var(--gold-dk), var(--gold));
+  border-radius: 6px; transition: width .6s ease;
+}
+.bar-val { font-size: 14px; font-weight: 700; color: var(--ink); width: 40px; text-align: right; }
+
+/* 하단 흥미코드 강조 박스 스타일 */
+.seal-box {
+  background: var(--gold-lt); border-left: 5px solid var(--gold);
+  border-radius: 0 4px 4px 0; padding: 10px 15px; margin: 15px 0;
+  font-size: 15px; color: var(--ink); font-weight: 700;
+  box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
+}
+/* 팝업 검색창 스타일 */
+.search-popup {
+    position: absolute;
+    bottom: 250px; /* 대화창 높이(220px) + 여백 */
+    padding: 40px 5px 10px 5px !important; /* 상단 패딩 늘림 및 전체 패딩 조정 */
+    right: 5%;
+    width: 280px; /* 너비 축소 */
+    background-color: #f8e5c0 !important;
+    color: #000 !important;
+    z-index: 1000;
+    box-shadow: 0 -5px 15px rgba(0,0,0,0.5);
+    overflow-x: hidden !important;
+    box-sizing: border-box; /* 패딩이 너비에 포함되도록 */
+}
+
+.search-popup .job-list-container {
+    overflow-x: hidden !important;
+    width: 100%;
+}
+
+.search-popup .title {
+    background-color: #f8e5c0 !important;
+    color: #000 !important;
+}
+
+/* 검색 결과 버튼 스타일 */
+#phase-roadmap .nes-btn.is-primary {
+background-color: #92cc41 !important; /* NES.css success 초록색 */
+color: #fff !important;               /* 흰색 글씨 */
+box-shadow: 4px 4px 0 #000 !important; /* 검정 그림자 */
+border: 4px solid #000 !important;
+}
+
+/* 마우스 올렸을 때 효과 */
+#phase-roadmap .nes-btn.is-primary:hover {
+background-color: #76a437 !important; /* 조금 더 진한 초록색 */
+color: #000 !important;
+text-decoration: none;
+}
+
+/* =============================================
+   인트로 Google 로그인 버튼 - 이미지 에셋 방식
+   ============================================= */
+#login-buttons {
+    display: contents;
+}
+
+.login-btn {
+    position: absolute;
+    bottom: 32%;
+    left: 50%;
+    transform: translateX(-50%);
+
+    width: 190px;
+    height: 58px;
+
+    background: url('/static/assets/google_auth_btn.png') no-repeat center center;
+    background-size: contain;
+
+    border: none;
+    padding: 0;
+    margin: 0;
+
+    color: transparent;
+    font-size: 0;
+
+    cursor: pointer;
+    z-index: 100;
+
+    outline: none !important;
+    box-shadow: none !important;
+    appearance: none;
+    -webkit-tap-highlight-color: transparent;
+
+}
+
+.login-btn:hover {
+    filter: brightness(1.06);
+}
+
+.login-btn:active {
+    transform: translateX(-50%) translateY(3px);
+    filter: brightness(0.96);
+}
+
+.login-btn:focus,
+.login-btn:active {
+    outline: none !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+/* 로그인 후: 우측 상단 배지 */
+.auth-badge-top {
+    position: absolute;
+    top: 15px;
+    right: 15px;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(0, 0, 0, 0.78);
+    border: 2px solid #f7d51d;
+    padding: 6px 14px;
+    font-size: 13px;
+    color: #f7d51d;
+    font-family: 'DungGeunMo', sans-serif;
+    box-shadow: 3px 3px 0 #000;
+}
+.auth-small-btn {
+    background: transparent;
+    border: 1px solid #f7d51d;
+    color: #f7d51d;
+    font-family: 'DungGeunMo', sans-serif;
+    font-size: 11px;
+    padding: 2px 8px;
+    cursor: pointer;
+}
+.auth-small-btn:hover { background: rgba(247, 213, 29, 0.15); }
+.auth-small-btn--danger { border-color: #e76e55; color: #e76e55; }
+.auth-small-btn--danger:hover { background: rgba(231, 110, 85, 0.15); }
+
+.history-bulk-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 18px;
+    padding: 10px 0 14px;
+    background: #212529;
+    border-bottom: 2px solid #f7d51d;
+}
+
+.history-select-all,
+.history-bulk-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #fff;
+}
+
+.history-select-all input,
+.history-card-check input {
+    width: 20px;
+    height: 20px;
+    cursor: pointer;
+}
+
+.history-card {
+    margin-bottom: 20px;
+    background: #fff !important;
+    color: #000 !important;
+}
+
+.history-card-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+}
+
+.history-card-check {
+    display: flex;
+    align-items: center;
+    flex: 0 0 auto;
+}
+
+.history-card-desc {
+    flex: 1 1 220px;
+    line-height: 1.5;
+}
+
+.history-card-actions {
+    display: flex;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+#history-delete-selected:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+/* =============================================
+   Phase 2 대화창 — 양피지 스타일
+   ============================================= */
+.upload-dialogue {
+    background-color: #f8e5c0 !important;
+    color: #212529 !important;
+    height: auto !important;
+    min-height: 220px;
+}
+.upload-dialogue .typewriter-text { color: #3a2a10 !important; }
+
+.upload-options {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    width: 100%;
+    margin-top: 10px;
+}
+.upload-option-card {
+    flex: 1;
+    background: rgba(139, 90, 43, 0.08);
+    border: 1px solid rgba(139, 90, 43, 0.28);
+    border-radius: 4px;
+    padding: 10px 14px;
+}
+.option-title {
+    font-size: 14px;
+    font-weight: bold;
+    color: #5c3a1e;
+    margin-bottom: 6px;
+}
+.option-desc {
+    font-size: 12px;
+    color: #7a5c3a;
+    line-height: 1.5;
+    margin-bottom: 8px;
+}
+.option-link {
+    display: block;
+    font-size: 11px;
+    color: #2e7d32;
+    text-decoration: none;
+    margin-bottom: 8px;
+}
+.option-link:hover { text-decoration: underline; }
+.option-input { display: flex; align-items: center; gap: 8px; }
+.upload-submit-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    flex-shrink: 0;
+}
+.upload-submit-stack .nes-btn {
+    min-width: 128px;
+    white-space: nowrap;
+}
+.option-divider {
+    align-self: center;
+    font-size: 13px;
+    color: #8b6b3d;
+    padding: 0 2px;
+    flex-shrink: 0;
+}
+
+/* =============================================
+   직무 상세 정보 — 섹션 카드 레이아웃
+   ============================================= */
+.jd-section {
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin-bottom: 12px;
+    box-shadow: 2px 2px 5px rgba(0,0,0,0.06);
+}
+.jd-define {
+    background: rgba(245, 230, 200, 0.9);
+    border: 2px solid var(--gold);
+}
+.jd-role {
+    background: #edf4fb;
+    border-left: 5px solid #3498db;
+    border-radius: 0 6px 6px 0;
+}
+.jd-tasks {
+    background: var(--green-lt);
+    border-left: 5px solid var(--green-jade);
+    border-radius: 0 6px 6px 0;
+}
+.jd-skills {
+    background: #fff7e6;
+    border-left: 5px solid #EF9F27;
+    border-radius: 0 6px 6px 0;
+}
+.jd-section-title {
+    font-size: 16px;
+    font-weight: bold;
+    margin-bottom: 10px;
+    color: var(--ink) !important;
+    border-bottom: 1px solid rgba(0,0,0,0.1);
+    padding-bottom: 6px;
+}
+.jd-section-body { font-size: 15px !important; line-height: 1.7; color: var(--ink) !important; }
+.jd-tasks .jd-section-body { color: #1A5C35 !important; }
+.jd-skills .jd-section-body { color: #633806 !important; }
+.jd-para { margin: 4px 0 8px 0; color: inherit !important; }
+.jd-list { margin: 4px 0 8px 12px; padding-left: 18px; list-style: disc; color: inherit !important; }
+.jd-sublist { margin: 4px 0 4px 8px; padding-left: 16px; list-style: circle; color: inherit !important; }
+.jd-list li, .jd-sublist li { margin-bottom: 5px; line-height: 1.6; font-size: 15px !important; color: inherit !important; }
+.jd-empty { color: #888; font-size: 15px; }
+
+/* =============================================
+   Phase 4: 대분류 필터 패널 (화면 중앙 기준 왼쪽)
+   ============================================= */
+.category-panel {
+    position: absolute;
+    top: 30px;
+    left: 30%;
+    width: 15%;
+    height: 600px;
+    background-color: #f8e5c0 !important;
+    color: #000 !important;
+    overflow-y: auto;
+    padding-top: 30px !important;
+}
+
+.category-panel .title {
+    background-color: #f8e5c0 !important;
+    color: #000 !important;
+}
+
+.category-filter-btn {
+    font-size: 15px !important;
+    text-align: center !important;
+    padding: 6px 10px !important;
+}
+
+/* Phase 4 방보(직무 목록) — 화면 중앙 기준 오른쪽 */
+#phase-results .notice-board {
+    top: 30px;
+    left: 45%;
+    width: 27%;
+    height: 600px;
+}
+
+/* =============================================
+   Responsive layout
+   ============================================= */
+@media (max-width: 1200px) {
+    .dialogue-box {
+        font-size: 16px;
+    }
+
+    .notice-board,
+    .category-panel {
+        font-size: 14px;
+    }
+
+    .roadmap-stage-card {
+        padding: 30px;
+    }
+
+    .roadmap-stage-card div,
+    .roadmap-stage-card strong {
+        font-size: 16px;
+    }
+}
+
+@media (max-width: 900px) {
+    body,
+    html {
+        height: auto;
+        min-height: 100%;
+        overflow-y: auto;
+    }
+
+    #game-container {
+        width: 100vw;
+        min-height: 100dvh;
+        height: auto;
+        aspect-ratio: auto;
+        border-width: 0;
+        overflow-y: auto;
+        box-shadow: none;
+    }
+
+    .phase {
+        position: relative;
+        min-height: 100dvh;
+        height: auto;
+        overflow: hidden;
+        padding: 72px 16px 18px;
+    }
+
+    .phase.active {
+        display: block;
+    }
+
+    .phase > :not(.background) {
+        z-index: 1;
+    }
+
+    .background {
+        min-height: 100%;
+    }
+
+    .phase-back-btn {
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        z-index: 2100;
+        font-size: 12px !important;
+        padding: 6px 10px !important;
+    }
+
+    .auth-badge-top {
+        position: fixed;
+        top: 10px;
+        right: 10px;
+        left: auto;
+        max-width: calc(100vw - 120px);
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 6px;
+        padding: 6px 8px;
+        font-size: 11px;
+    }
+
+    .auth-small-btn {
+        font-size: 10px;
+        padding: 2px 6px;
+    }
+
+    #phase-intro {
+        height: 100dvh;
+        min-height: 560px;
+        padding: 0;
+        overflow: hidden;
+    }
+
+    .game-title {
+        top: 24%;
+        padding: 0 16px;
+        font-size: clamp(2rem, 10vw, 3.4rem);
+        text-shadow: 3px 3px #000;
+    }
+
+    .login-btn {
+        bottom: 34%;
+        width: min(190px, 48vw);
+        height: 58px;
+    }
+
+    .start-btn {
+        bottom: 21%;
+        width: min(250px, 66vw);
+        height: 76px;
+    }
+
+    #phase-upload.active,
+    #phase-scores.active,
+    #phase-results.active,
+    #phase-job-detail.active,
+    #phase-major.active,
+    #phase-roadmap.active {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+    }
+
+    #phase-upload.active,
+    #phase-major.active {
+        justify-content: flex-end;
+    }
+
+    .dialogue-container,
+    .roadmap-container {
+        position: relative;
+        left: auto;
+        bottom: auto;
+        width: 100%;
+        max-width: 760px;
+        margin: 0 auto;
+    }
+
+    .dialogue-box {
+        height: auto;
+        min-height: 150px;
+        max-height: none;
+        overflow-y: auto;
+        font-size: 15px;
+        line-height: 1.55;
+    }
+
+    .upload-dialogue {
+        max-height: calc(100dvh - 96px);
+    }
+
+    .upload-options {
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .upload-option-card {
+        width: 100%;
+    }
+
+    .option-divider {
+        align-self: stretch;
+        text-align: center;
+        padding: 2px 0;
+    }
+
+    .option-input {
+        align-items: stretch;
+    }
+
+    .search-popup {
+        position: relative;
+        right: auto;
+        bottom: auto;
+        width: 100%;
+        max-width: 760px;
+        margin: 0 auto;
+        padding: 36px 10px 12px !important;
+        order: -1;
+    }
+
+    #phase-scores > .notice-board,
+    #phase-job-detail > .notice-board,
+    #phase-results .notice-board,
+    .category-panel {
+        position: relative !important;
+        top: auto !important;
+        left: auto !important;
+        width: 100% !important;
+        max-width: 760px;
+        height: auto !important;
+        margin: 0 auto;
+        padding-top: 30px !important;
+    }
+
+    #phase-scores > .notice-board {
+        max-height: 58dvh !important;
+    }
+
+    #phase-results .notice-board,
+    .category-panel {
+        max-height: 32dvh;
+    }
+
+    #phase-job-detail > .notice-board {
+        max-height: 68dvh !important;
+    }
+
+    #score-display-area {
+        padding: 14px !important;
+    }
+
+    #detail-content {
+        max-height: 46dvh !important;
+        padding: 12px 8px !important;
+    }
+
+    .category-filter-btn {
+        white-space: normal !important;
+    }
+
+    .job-list-container .nes-btn {
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+
+    .choice-area {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 10px;
+    }
+
+    .choice-area .nes-btn {
+        min-width: min(260px, 100%);
+        white-space: normal;
+    }
+
+    #phase-roadmap.active {
+        padding: 12px;
+        gap: 0;
+    }
+
+    .roadmap-container {
+        height: auto;
+        min-height: 0;
+        max-width: 860px;
+        flex: 1;
+    }
+
+    .roadmap-box {
+        height: calc(100dvh - 24px) !important;
+        min-height: 560px;
+        overflow: visible !important;
+    }
+
+    .roadmap-slider-wrapper {
+        height: calc(100% - 58px);
+        padding: 16px;
+    }
+
+    .roadmap-stage-card {
+        padding: 30px 24px;
+    }
+
+    .slide-btn {
+        width: 44px;
+        height: 44px;
+        font-size: 20px;
+        top: 48%;
+        box-shadow: 3px 3px 0 #000;
+    }
+
+    .slide-prev {
+        left: 8px;
+    }
+
+    .slide-next {
+        right: 8px;
+    }
+
+    .roadmap-chat-input-row {
+        flex-wrap: wrap;
+    }
+
+    .roadmap-chat-input-row .nes-input {
+        flex: 1 1 240px;
+    }
+
+    .roadmap-chat-input-row .nes-btn {
+        flex: 0 0 auto;
+    }
+
+    #history-modal {
+        position: fixed !important;
+        top: 10px !important;
+        left: 10px !important;
+        width: calc(100vw - 20px) !important;
+        height: calc(100dvh - 20px) !important;
+        padding: 18px !important;
+        overflow: hidden;
+    }
+
+    #history-modal > .title {
+        font-size: 18px !important;
+        line-height: 1.35;
+    }
+
+    #history-list {
+        max-height: calc(100% - 98px) !important;
+    }
+
+    .history-bulk-toolbar {
+        flex-wrap: wrap;
+        align-items: flex-start;
+    }
+
+    .history-card-row {
+        align-items: flex-start;
+        flex-wrap: wrap;
+    }
+
+    .history-card-actions {
+        width: 100%;
+        justify-content: flex-start;
+    }
+}
+
+@media (max-width: 640px) {
+    #game-container {
+        min-height: 100dvh;
+    }
+
+    .phase {
+        padding: 62px 10px 12px;
+    }
+
+    #phase-intro {
+        min-height: 520px;
+    }
+
+    .auth-badge-top {
+        max-width: calc(100vw - 92px);
+        padding: 5px 7px;
+        font-size: 10px;
+    }
+
+    .game-title {
+        top: 20%;
+        font-size: clamp(1.8rem, 11vw, 2.8rem);
+    }
+
+    .login-btn {
+        bottom: 36%;
+        width: 170px;
+    }
+
+    .start-btn {
+        bottom: 22%;
+        width: 220px;
+        height: 68px;
+    }
+
+    .dialogue-box {
+        font-size: 13px;
+        min-height: 132px;
+        padding: 18px !important;
+    }
+
+    .upload-dialogue {
+        max-height: calc(100dvh - 80px);
+    }
+
+    .option-input {
+        flex-direction: column;
+    }
+
+    .upload-submit-stack,
+    .upload-submit-stack .nes-btn,
+    .option-input .nes-btn,
+    .option-input .nes-input,
+    .option-input input[type="file"] {
+        width: 100%;
+    }
+
+    .notice-board,
+    .category-panel {
+        padding-left: 12px !important;
+        padding-right: 12px !important;
+    }
+
+    #phase-scores > .notice-board,
+    #phase-results .notice-board,
+    .category-panel,
+    #phase-job-detail > .notice-board {
+        max-height: none !important;
+    }
+
+    #phase-scores > .notice-board {
+        flex: 0 0 auto;
+    }
+
+    .bar-row {
+        gap: 6px;
+    }
+
+    .bar-label {
+        width: 72px;
+        font-size: 12px;
+    }
+
+    .bar-val {
+        width: 34px;
+        font-size: 12px;
+    }
+
+    #detail-content {
+        max-height: 52dvh !important;
+        padding: 8px 2px !important;
+    }
+
+    .jd-section {
+        padding: 12px;
+    }
+
+    .jd-section-title {
+        font-size: 14px;
+    }
+
+    .jd-section-body,
+    .jd-list li,
+    .jd-sublist li {
+        font-size: 13px !important;
+    }
+
+    .roadmap-box {
+        height: calc(100dvh - 20px) !important;
+        min-height: 0;
+    }
+
+    .roadmap-slider-wrapper {
+        padding: 10px;
+        border-width: 3px;
+    }
+
+    .roadmap-stage-card {
+        padding: 24px 14px;
+    }
+
+    .roadmap-stage-card .title {
+        font-size: 1.05rem !important;
+        line-height: 1.45;
+        padding-right: 36px;
+    }
+
+    .roadmap-stage-card div,
+    .roadmap-stage-card strong,
+    .roadmap-stage-card .roadmap-desc,
+    .roadmap-stage-card .result-box,
+    .roadmap-stage-card .tip-box {
+        font-size: 13px !important;
+        line-height: 1.65;
+    }
+
+    .roadmap-stage-card .roadmap-desc,
+    .roadmap-stage-card .result-box,
+    .roadmap-stage-card .tip-box {
+        padding: 12px;
+    }
+
+    .slide-btn {
+        width: 38px;
+        height: 38px;
+        font-size: 18px;
+        border-width: 3px;
+    }
+
+    .slide-prev {
+        left: 4px;
+    }
+
+    .slide-next {
+        right: 4px;
+    }
+
+    .roadmap-chat-intro {
+        font-size: 12px !important;
+    }
+
+    .roadmap-chat-suggestions {
+        flex-wrap: wrap;
+        overflow-x: visible;
+    }
+
+    .roadmap-chat-suggestions .nes-btn {
+        flex: 1 1 100%;
+        white-space: normal;
+        line-height: 1.35;
+    }
+
+    .roadmap-chat-message {
+        max-width: 96%;
+    }
+
+    .roadmap-chat-body {
+        font-size: 12px !important;
+    }
+
+    .roadmap-chat-input-row .nes-input,
+    .roadmap-chat-input-row .nes-btn {
+        flex: 1 1 100%;
+        width: 100%;
+    }
+
+    .roadmap-final-actions .nes-btn,
+    #phase-roadmap .roadmap-box > div:last-child .nes-btn {
+        width: 100%;
+        white-space: normal;
+    }
+
+    #history-modal {
+        top: 0 !important;
+        left: 0 !important;
+        width: 100vw !important;
+        height: 100dvh !important;
+        padding: 14px !important;
+    }
+
+    .history-bulk-actions,
+    .history-select-all,
+    .history-card-actions,
+    .history-card-actions .nes-btn {
+        width: 100%;
+    }
+
+    .history-bulk-actions {
+        flex-wrap: wrap;
+    }
+
+    .history-card-actions .nes-btn {
+        white-space: normal;
+    }
+}
+
+@media (max-height: 680px) and (max-width: 900px) {
+    .dialogue-box {
+        min-height: 112px;
+    }
+
+    .game-title {
+        top: 16%;
+    }
+
+    .login-btn {
+        bottom: 35%;
+    }
+
+    .start-btn {
+        bottom: 19%;
+    }
+
+    .roadmap-stage-card {
+        padding-top: 18px;
+        padding-bottom: 18px;
+    }
+}
