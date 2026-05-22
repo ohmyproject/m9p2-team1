@@ -56,7 +56,6 @@
    - 사용자에게 실제 대화하는 듯한 생동감을 제공하며 대기 시간을 시각적으로 단축시켰습니다.
 16. **안정적인 하이브리드 통신**: 기본 기능은 `urllib` 기반 REST 통신을, 고도화된 AI 상담은 `LangChain` 프레임워크를 활용하여 안정성과 기능성을 동시에 확보했습니다.
 
-
 ## 기술 스택
 
 <details>
@@ -67,37 +66,46 @@
 <div align="center">
 
 ### Backend
-<span style="display:inline-block; padding:8px 14px; margin:4px; border-radius:999px; background:#E8F5F2; color:#009688; font-weight:700; border:1px solid #B2DFDB;">FastAPI</span>
-<span style="display:inline-block; padding:8px 14px; margin:4px; border-radius:999px; background:#EAF2FF; color:#3776AB; font-weight:700; border:1px solid #BBD7FF;">Python</span>
+
+![FastAPI](https://img.shields.io/badge/FastAPI-E8F5F2?style=for-the-badge&logo=fastapi&logoColor=009688&labelColor=E8F5F2)
+![Python](https://img.shields.io/badge/Python-EAF2FF?style=for-the-badge&logo=python&logoColor=3776AB&labelColor=EAF2FF)
 
 ### Frontend
-<span style="display:inline-block; padding:8px 14px; margin:4px; border-radius:999px; background:#FFF0E8; color:#E34F26; font-weight:700; border:1px solid #FFD0BD;">HTML5</span>
-<span style="display:inline-block; padding:8px 14px; margin:4px; border-radius:999px; background:#EAF2FF; color:#1572B6; font-weight:700; border:1px solid #BBD7FF;">CSS3</span>
-<span style="display:inline-block; padding:8px 14px; margin:4px; border-radius:999px; background:#FFF9D7; color:#9A7B00; font-weight:700; border:1px solid #F7DF1E;">Vanilla JavaScript</span>
-<span style="display:inline-block; padding:8px 14px; margin:4px; border-radius:999px; background:#FFF6D8; color:#8A6D00; font-weight:700; border:1px solid #FFD966;">NES.css</span>
+
+![HTML5](https://img.shields.io/badge/HTML5-FFF0E8?style=for-the-badge&logo=html5&logoColor=E34F26&labelColor=FFF0E8)
+![CSS3](https://img.shields.io/badge/CSS3-EAF2FF?style=for-the-badge&logo=css3&logoColor=1572B6&labelColor=EAF2FF)
+![Vanilla JavaScript](https://img.shields.io/badge/Vanilla%20JavaScript-FFF9D7?style=for-the-badge&logo=javascript&logoColor=9A7B00&labelColor=FFF9D7)
+![NES.css](https://img.shields.io/badge/NES.css-FFF6D8?style=for-the-badge&logo=css3&logoColor=8A6D00&labelColor=FFF6D8)
 
 ### Database / Auth
-<span style="display:inline-block; padding:8px 14px; margin:4px; border-radius:999px; background:#E9FFF4; color:#2E9F6E; font-weight:700; border:1px solid #B7F3D2;">Supabase PostgreSQL</span>
-<span style="display:inline-block; padding:8px 14px; margin:4px; border-radius:999px; background:#E9FFF4; color:#2E9F6E; font-weight:700; border:1px solid #B7F3D2;">Supabase Auth</span>
+
+![Supabase PostgreSQL](https://img.shields.io/badge/Supabase%20PostgreSQL-E9FFF4?style=for-the-badge&logo=supabase&logoColor=2E9F6E&labelColor=E9FFF4)
+![Supabase Auth](https://img.shields.io/badge/Supabase%20Auth-E9FFF4?style=for-the-badge&logo=supabase&logoColor=2E9F6E&labelColor=E9FFF4)
 
 ### Vector Search
-<span style="display:inline-block; padding:8px 14px; margin:4px; border-radius:999px; background:#EEF4FF; color:#336791; font-weight:700; border:1px solid #C8D8F0;">pgvector</span>
-<span style="display:inline-block; padding:8px 14px; margin:4px; border-radius:999px; background:#E9FFF4; color:#2E9F6E; font-weight:700; border:1px solid #B7F3D2;">Supabase RPC</span>
+
+![pgvector](https://img.shields.io/badge/pgvector-EEF4FF?style=for-the-badge&logo=postgresql&logoColor=336791&labelColor=EEF4FF)
+![Supabase RPC](https://img.shields.io/badge/Supabase%20RPC-E9FFF4?style=for-the-badge&logo=supabase&logoColor=2E9F6E&labelColor=E9FFF4)
 
 ### AI / LLM
-<span style="display:inline-block; padding:8px 14px; margin:4px; border-radius:999px; background:#F0ECFF; color:#412991; font-weight:700; border:1px solid #D5C9FF;">OpenAI API</span>
-<span style="display:inline-block; padding:8px 14px; margin:4px; border-radius:999px; background:#EAF7F4; color:#1C3C3C; font-weight:700; border:1px solid #BFE4DD;">LangChain</span>
-<span style="display:inline-block; padding:8px 14px; margin:4px; border-radius:999px; background:#F0ECFF; color:#412991; font-weight:700; border:1px solid #D5C9FF;">OpenAI Embeddings</span>
+
+![OpenAI API](https://img.shields.io/badge/OpenAI%20API-F0ECFF?style=for-the-badge&logo=openai&logoColor=412991&labelColor=F0ECFF)
+![LangChain](https://img.shields.io/badge/LangChain-EAF7F4?style=for-the-badge&logo=chainlink&logoColor=1C3C3C&labelColor=EAF7F4)
+![OpenAI Embeddings](https://img.shields.io/badge/OpenAI%20Embeddings-F0ECFF?style=for-the-badge&logo=openai&logoColor=412991&labelColor=F0ECFF)
 
 ### PDF / Data
-<span style="display:inline-block; padding:8px 14px; margin:4px; border-radius:999px; background:#EAF2FF; color:#3776AB; font-weight:700; border:1px solid #BBD7FF;">pypdf</span>
-<span style="display:inline-block; padding:8px 14px; margin:4px; border-radius:999px; background:#F0EEFF; color:#150458; font-weight:700; border:1px solid #D5D0FF;">pandas</span>
-<span style="display:inline-block; padding:8px 14px; margin:4px; border-radius:999px; background:#EAF5FF; color:#013243; font-weight:700; border:1px solid #B8DFFF;">NumPy</span>
 
-### Deploy / Runtime
-<span style="display:inline-block; padding:8px 14px; margin:4px; border-radius:999px; background:#EAF2FF; color:#4285F4; font-weight:700; border:1px solid #C7D9FF;">Google Cloud Run</span>
-<span style="display:inline-block; padding:8px 14px; margin:4px; border-radius:999px; background:#EAF6FF; color:#2496ED; font-weight:700; border:1px solid #B9E0FF;">Docker</span>
-<span style="display:inline-block; padding:8px 14px; margin:4px; border-radius:999px; background:#EEF9EA; color:#499848; font-weight:700; border:1px solid #C9EBC4;">Uvicorn</span>
+![pypdf](https://img.shields.io/badge/pypdf-EAF2FF?style=for-the-badge&logo=python&logoColor=3776AB&labelColor=EAF2FF)
+![pandas](https://img.shields.io/badge/pandas-F0EEFF?style=for-the-badge&logo=pandas&logoColor=150458&labelColor=F0EEFF)
+![NumPy](https://img.shields.io/badge/NumPy-EAF5FF?style=for-the-badge&logo=numpy&logoColor=013243&labelColor=EAF5FF)
+
+### Deploy / Runtime / Version Control
+
+![Google Cloud Run](https://img.shields.io/badge/Google%20Cloud%20Run-EAF2FF?style=for-the-badge&logo=googlecloud&logoColor=4285F4&labelColor=EAF2FF)
+![Docker](https://img.shields.io/badge/Docker-EAF6FF?style=for-the-badge&logo=docker&logoColor=2496ED&labelColor=EAF6FF)
+![Uvicorn](https://img.shields.io/badge/Uvicorn-EEF9EA?style=for-the-badge&logo=gunicorn&logoColor=499848&labelColor=EEF9EA)
+![GitHub](https://img.shields.io/badge/GitHub-181717?style=for-the-badge&logo=github&logoColor=white)
+
 
 </div>
 
